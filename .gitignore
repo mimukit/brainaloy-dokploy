@@ -1,5 +1,2 @@
-# Per-site scaffolding contains generated secrets — never commit.
-sites/
-
 # OS / editor noise
 .DS_Store

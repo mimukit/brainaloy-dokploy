@@ -183,73 +183,29 @@ the domain in Dokploy's Compose **Domain** tab (§7).
 1. In Dokploy: **Create → Compose service** (Compose type: **Docker Compose**).
 2. Target **server = your DO VPS**. Enable **Isolated Deployments** (each project
    gets its own network; no need to hand-attach `dokploy-network`).
-3. Paste the compose below (raw editor). Set env vars in Dokploy's **Environment**
-   UI (they stay in the panel, covered by the R2 backup).
-4. In the **Domain** tab: add the site domain → service **`wordpress`**, container
-   **port 80**, **HTTPS + Let's Encrypt**.
-5. **Deploy.** Finish WordPress setup in the browser, then install **UpdraftPlus**
-   and point it at your chosen remote for site backups.
+3. Paste the canonical compose (see [`templates/wordpress.compose.yml`](templates/wordpress.compose.yml))
+   into the raw editor. **No env vars to set** — the DB credentials are the
+   `SERVICE_*` variables Dokploy auto-generates on deploy.
+4. **Deploy.** The site comes up on its Dokploy-assigned URL — no domain yet.
+5. (Optional) Restore a backup with UpdraftPlus while the site is still on its
+   temporary URL.
+6. When ready to go live, open the **Domain** tab: add the site domain → service
+   **`wordpress`**, container **port 80**, **HTTPS + Let's Encrypt**. WordPress
+   picks up the domain from the request — nothing to edit in the compose.
+7. Install **UpdraftPlus** and point it at your chosen remote for ongoing backups.
 
-### Per-site `docker-compose.yml` (official images, tuned DB, reverse-proxy fix)
+### Per-site `docker-compose.yml`
 
-```yaml
-services:
-  wordpress:
-    image: wordpress:php8.3-apache
-    restart: unless-stopped
-    depends_on:
-      - db
-    environment:
-      WORDPRESS_DB_HOST: db
-      WORDPRESS_DB_NAME: wordpress
-      WORDPRESS_DB_USER: wp
-      WORDPRESS_DB_PASSWORD: ${WP_DB_PASSWORD}
-      # Trust Traefik's SSL termination + force correct site URLs.
-      # NOTE: $ is escaped as $$ so Dokploy/Compose does not interpolate it.
-      WORDPRESS_CONFIG_EXTRA: |
-        define('WP_HOME','https://${SITE_DOMAIN}');
-        define('WP_SITEURL','https://${SITE_DOMAIN}');
-        if (isset($$_SERVER['HTTP_X_FORWARDED_PROTO']) && $$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
-          $$_SERVER['HTTPS'] = 'on';
-        }
-    volumes:
-      - wp_content:/var/www/html/wp-content
-    expose:
-      - "80"
+The stack is **identical for every site** — no per-site edits. It's kept in
+[`templates/wordpress.compose.yml`](templates/wordpress.compose.yml): official
+`wordpress` + `mariadb` images, tuned DB, the reverse-proxy HTTPS fix, and named
+volumes. No domain is baked in, so create → restore → wire the domain all work
+without touching the file.
 
-  db:
-    image: mariadb:11
-    restart: unless-stopped
-    # MariaDB tuning automated here — no manual my.cnf.
-    command: >-
-      --innodb-buffer-pool-size=192M
-      --max-connections=50
-      --innodb-log-file-size=64M
-    environment:
-      MARIADB_DATABASE: wordpress
-      MARIADB_USER: wp
-      MARIADB_PASSWORD: ${WP_DB_PASSWORD}
-      MARIADB_ROOT_PASSWORD: ${WP_DB_ROOT_PASSWORD}
-    volumes:
-      - db_data:/var/lib/mysql
-
-volumes:
-  wp_content:
-  db_data:
-```
-
-Set these in Dokploy **Environment** (not in the repo/UI compose text):
-
-```
-SITE_DOMAIN=example.com
-WP_DB_PASSWORD=<strong-random>
-WP_DB_ROOT_PASSWORD=<strong-random>
-```
-
-> **Adding more sites:** copy this compose into a new Compose service, change
-> `SITE_DOMAIN` + passwords + the domain entry. Budget ~300–400 MB RAM per site;
-> at ~2–3 sites on 2 GB, add a second droplet as another Dokploy server rather
-> than overloading one box.
+> **Adding more sites:** paste the same compose into a new Compose service and
+> deploy — Dokploy generates fresh `SERVICE_*` credentials per service. Budget
+> ~300–400 MB RAM per site; at ~2–3 sites on 2 GB, add a second droplet as another
+> Dokploy server rather than overloading one box.
 
 > **Restore note (volumes):** if you ever restore a volume, Dokploy names Compose
 > volumes `{appName}_{volumeName}` — match that so the restored volume is picked up.
@@ -279,14 +235,12 @@ The deterministic parts are scripted in `scripts/`; interactive UI/auth steps st
 | `scripts/setup-control-panel-vm.sh` | Any Ubuntu LTS host | Installs CLI tools (curl, tmux, btop, vim, lazydocker), Tailscale, and Dokploy. Machine-agnostic; run inside the VM. (Tailscale auth + admin account are interactive.) |
 | `scripts/setup-remote-vps.sh` | DO droplet (root) | Swap + swappiness, Docker log rotation, unattended security upgrades, Tailscale. **Does not** install Docker or touch the firewall. |
 | `scripts/vps-firewall-lockdown.sh` | DO droplet (root) | Closes public 22, allows 80/443 + `tailscale0` only. Guarded against lockout; run **last**. |
-| `scripts/new-wordpress-site.sh <domain>` | macOS host | Generates strong DB passwords + a per-site env block and a copy of the compose under `sites/<domain>/` (gitignored). |
-| `templates/wordpress.compose.yml` | — | Canonical WordPress stack to paste into the Dokploy Compose editor. |
+| `templates/wordpress.compose.yml` | — | Canonical WordPress stack to paste into the Dokploy Compose editor. Identical for every site; no env vars needed (Dokploy generates the `SERVICE_*` DB credentials). |
 
 Typical order: `orb-create-vm.sh` (or create the VM by hand) → `setup-control-panel-vm.sh`
 inside it → create droplet → `setup-remote-vps.sh` → add server in Dokploy UI →
-`new-wordpress-site.sh` + deploy + verify → `vps-firewall-lockdown.sh`.
-
-> `sites/` holds generated secrets and is gitignored — keep it off version control.
+create the site in the Dokploy dashboard (paste the compose) + deploy + verify →
+`vps-firewall-lockdown.sh`.
 
 ---
 

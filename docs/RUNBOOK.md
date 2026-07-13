@@ -54,14 +54,14 @@ Legend: `[ ]` todo · 🖐 manual UI/auth step · ⛔ verification gate (don't p
 - [ ] 🖐 Run **provisioning**; wait for green/connected
   - [ ] If it fails on Ubuntu 26.04 → rebuild droplet on **24.04 LTS**, redo Phase 3
 - [ ] ⛔ Server shows **connected** in Dokploy
-- [ ] Generate a site: `scripts/new-wordpress-site.sh <domain>`
 - [ ] 🖐 Create Compose service (type: Docker Compose), server = the DO VPS, **Isolated Deployments ON**
-- [ ] 🖐 Paste `sites/<domain>/docker-compose.yml`; paste `sites/<domain>/dokploy.env` into Environment
-- [ ] 🖐 Domain tab → host=`<domain>`, service=`wordpress`, port `80`, HTTPS + Let's Encrypt
+- [ ] 🖐 Paste `templates/wordpress.compose.yml` (no env vars to set — Dokploy generates the `SERVICE_*` DB credentials)
+- [ ] 🖐 Deploy; site comes up on its Dokploy-assigned URL (no domain yet)
+- [ ] 🖐 (Optional) Restore a backup with **UpdraftPlus** while still on the temporary URL
+- [ ] 🖐 Go live: Domain tab → host=`<domain>`, service=`wordpress`, port `80`, HTTPS + Let's Encrypt
 - [ ] 🖐 DNS: **A record** `<domain>` → droplet **public IP** (DNS-only / grey cloud)
-- [ ] 🖐 Deploy
 - [ ] ⛔ Site loads over **HTTPS** on the public internet; valid Let's Encrypt cert; no redirect loop
-- [ ] 🖐 Finish WP install; install **UpdraftPlus** and point it at its remote
+- [ ] 🖐 Finish WP install (fresh sites); install **UpdraftPlus** and point it at its remote
 - [ ] 🖐 Manual Dokploy **System Backup → R2**
 
 ---
@@ -77,8 +77,7 @@ Legend: `[ ]` todo · 🖐 manual UI/auth step · ⛔ verification gate (don't p
 ---
 
 ## Add another site later
-- [ ] `scripts/new-wordpress-site.sh <domain2>`
-- [ ] 🖐 New Compose service on the VPS → paste compose + env → Domain tab → DNS A record → deploy
+- [ ] 🖐 New Compose service on the VPS → paste `templates/wordpress.compose.yml` → deploy → (restore) → Domain tab → DNS A record
 - [ ] 🖐 Manual System Backup → R2
 - [ ] If RAM tight (~3 sites on 2 GB): spin a new droplet (Phase 3–5) and add as another Dokploy server
 
