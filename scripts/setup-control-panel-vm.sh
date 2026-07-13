@@ -55,6 +55,35 @@ else
   echo "    Dokploy installed"
 fi
 
+# Self-heal: the official installer creates postgres → redis → dokploy →
+# traefik in sequence. If one step fails (e.g. a `redis:7` image pull dies on
+# broken MagicDNS — the very thing step 4 fixes, but which bites DURING install),
+# the stack ends up missing a service and the UI reports e.g.
+#   "(HTTP code 404) no such service - service dokploy-redis not found".
+# The guard above only checks that *some* dokploy* container runs, so a re-run
+# won't notice. Reconcile the Swarm services the installer owns.
+if $SUDO docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q active; then
+  # Redis is stateless (cache/queue) and its create command is stable across
+  # Dokploy versions, so recreating it when missing is safe and self-healing.
+  if $SUDO docker service inspect dokploy-redis >/dev/null 2>&1; then
+    echo "    dokploy-redis service present — skipping"
+  else
+    echo "    dokploy-redis service missing — recreating"
+    $SUDO docker service create \
+      --name dokploy-redis \
+      --constraint 'node.role==manager' \
+      --network dokploy-network \
+      --mount type=volume,source=redis-data-volume,destination=/data \
+      redis:7
+  fi
+  # Postgres holds real state and its spec (password via env vs. Docker secret)
+  # varies by Dokploy version — don't recreate it with guessed credentials.
+  # Just flag it for a human, who can restore from a backup if the volume is gone.
+  if ! $SUDO docker service inspect dokploy-postgres >/dev/null 2>&1; then
+    echo "    ⚠️  dokploy-postgres service MISSING — restore it manually (holds DB state)."
+  fi
+fi
+
 echo "==> [4/5] Docker daemon DNS (fixes container lookups on a Tailscale host)"
 # Tailscale MagicDNS rewrites the host /etc/resolv.conf to nameserver
 # 100.100.100.100. Docker's embedded resolver (127.0.0.11) forwards there, but
