@@ -6,15 +6,15 @@
 #   service = wordpress, container port = 80, HTTPS + Let's Encrypt.
 services:
   wordpress:
-    image: wordpress:php8.3-apache
+    image: wordpress:7-php8.5-apache
     restart: unless-stopped
     depends_on:
       - db
     environment:
-      WORDPRESS_DB_HOST: db
-      WORDPRESS_DB_NAME: wordpress
-      WORDPRESS_DB_USER: wp
-      WORDPRESS_DB_PASSWORD: ${WP_DB_PASSWORD}
+      - WORDPRESS_DB_HOST=db
+      - WORDPRESS_DB_USER=$SERVICE_USER_WORDPRESS
+      - WORDPRESS_DB_PASSWORD=$SERVICE_PASSWORD_WORDPRESS
+      - WORDPRESS_DB_NAME=wordpress
       # Trust Traefik's SSL termination + pin the site URLs to https.
       # NOTE: PHP '$' is escaped as '$$' so Dokploy/Compose does not interpolate it.
       WORDPRESS_CONFIG_EXTRA: |
@@ -25,11 +25,14 @@ services:
         }
     volumes:
       - wp_content:/var/www/html/wp-content
-    expose:
-      - "80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   db:
-    image: mariadb:11
+    image: mariadb:12
     restart: unless-stopped
     # MariaDB tuning automated here — no manual my.cnf. Tune down if cramming sites.
     command: >-
@@ -37,12 +40,17 @@ services:
       --max-connections=50
       --innodb-log-file-size=64M
     environment:
-      MARIADB_DATABASE: wordpress
-      MARIADB_USER: wp
-      MARIADB_PASSWORD: ${WP_DB_PASSWORD}
-      MARIADB_ROOT_PASSWORD: ${WP_DB_ROOT_PASSWORD}
+      - MYSQL_DATABASE=wordpress
+      - MYSQL_ROOT_PASSWORD=$SERVICE_PASSWORD_ROOT
+      - MYSQL_USER=$SERVICE_USER_WORDPRESS
+      - MYSQL_PASSWORD=$SERVICE_PASSWORD_WORDPRESS
     volumes:
       - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
 
 volumes:
   wp_content:
