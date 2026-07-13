@@ -29,20 +29,25 @@ fi
 echo 'vm.swappiness=10' > /etc/sysctl.d/99-swappiness.conf
 sysctl --system >/dev/null
 
-echo "==> [2/6] Docker log rotation (prevents logs filling a small disk)"
-# Pre-seed daemon.json so container logs are capped once Dokploy installs Docker.
+echo "==> [2/6] Docker daemon config (log rotation + DNS)"
+# Pre-seed daemon.json so container logs are capped once Dokploy installs Docker,
+# and so the embedded DNS resolver (127.0.0.11) forwards to a real public resolver.
+# Without "dns", Tailscale MagicDNS rewrites the host /etc/resolv.conf to
+# nameserver 100.100.100.100, which containers often can't reach — outbound
+# lookups then fail with "server misbehaving" (e.g. rclone can't resolve R2).
 mkdir -p /etc/docker
 if [[ ! -f /etc/docker/daemon.json ]]; then
   cat > /etc/docker/daemon.json <<'JSON'
 {
   "log-driver": "json-file",
-  "log-opts": { "max-size": "10m", "max-file": "3" }
+  "log-opts": { "max-size": "10m", "max-file": "3" },
+  "dns": ["1.1.1.1", "8.8.8.8"]
 }
 JSON
   # If Docker somehow already exists, apply now; otherwise it applies on install.
   systemctl is-active --quiet docker && systemctl restart docker || true
 else
-  echo "    /etc/docker/daemon.json exists — leaving it alone (merge log-opts manually if needed)"
+  echo "    /etc/docker/daemon.json exists — leaving it alone (merge log-opts + dns manually if needed)"
 fi
 
 echo "==> [3/6] Unattended security upgrades"
@@ -61,14 +66,29 @@ if ! command -v tailscale >/dev/null 2>&1; then
 fi
 
 echo "==> [5/6] Join tailnet"
+# --accept-dns=false: don't let Tailscale MagicDNS take over /etc/resolv.conf.
+# A misbehaving MagicDNS breaks HOST-level DNS (docker image pulls, apt, etc.);
+# the host resolver — not daemon.json "dns" — is what `docker pull` uses. We
+# address nodes by Tailscale IP, not MagicDNS name, so disabling it is safe.
 if tailscale status >/dev/null 2>&1; then
   echo "    already connected: $(tailscale ip -4 2>/dev/null || true)"
+  tailscale set --accept-dns=false 2>/dev/null || true
 elif [[ -n "${TS_AUTHKEY:-}" ]]; then
-  tailscale up --authkey "$TS_AUTHKEY" --ssh
+  tailscale up --authkey "$TS_AUTHKEY" --ssh --accept-dns=false
   echo "    joined. Tailscale IP: $(tailscale ip -4)"
 else
-  echo "    No TS_AUTHKEY provided. Run interactively:  tailscale up"
+  echo "    No TS_AUTHKEY provided. Run interactively:  tailscale up --accept-dns=false"
   echo "    Then note the IP with:  tailscale ip -4"
+fi
+
+# Belt-and-suspenders: --accept-dns=false flips the pref but does NOT always
+# restore a working /etc/resolv.conf (Tailscale can leave the dead MagicDNS
+# entry behind). If a host-level lookup still fails, pin public resolvers so
+# `docker pull` / apt work. Idempotent: only rewrites when DNS is actually broken.
+if tailscale status >/dev/null 2>&1 && ! getent hosts registry-1.docker.io >/dev/null 2>&1; then
+  echo "    Host DNS still broken after Tailscale — pinning public resolvers in /etc/resolv.conf"
+  printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
+  systemctl is-active --quiet docker && systemctl restart docker || true
 fi
 
 echo "==> [6/6] Enforce key-only SSH (disable password + PAM auth)"

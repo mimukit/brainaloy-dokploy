@@ -33,6 +33,13 @@ Legend: `[ ]` todo · 🖐 manual UI/auth step · ⛔ verification gate (don't p
 - [ ] 🖐 Run one **manual System Backup** now as a smoke test
 - [ ] ⛔ Backup object appears in the R2 bucket
 
+> **If "S3 Destination" test fails with `dial tcp: lookup ...r2.cloudflarestorage.com
+> on 127.0.0.11:53: server misbehaving`** — that's a DNS failure, not bad
+> credentials. This test runs on the **panel host** (the OrbStack VM), whose
+> Docker embedded resolver forwards to Tailscale MagicDNS, which containers
+> can't reach. Fix: give the Docker daemon a real resolver (pre-seeded by
+> `setup-control-panel-vm.sh`). See [Troubleshooting → Docker DNS](#troubleshooting) below.
+
 ---
 
 ## Phase 3 — Provision the DO droplet
@@ -87,3 +94,61 @@ Legend: `[ ]` todo · 🖐 manual UI/auth step · ⛔ verification gate (don't p
 ## Recovery drill (do once)
 - [ ] Fresh orb machine → install Dokploy → point at same R2 → **restore System Backup**
 - [ ] ⛔ Servers + sites reappear in the UI
+
+---
+
+## Troubleshooting
+
+### Docker DNS — container lookups fail (`server misbehaving`)
+
+Symptom (e.g. testing an S3 Destination, an image pull, or any outbound call from a container):
+
+```
+dial tcp: lookup <host> on 127.0.0.11:53: server misbehaving
+```
+
+Root cause: Tailscale MagicDNS takes over `/etc/resolv.conf` (`nameserver
+100.100.100.100`, or the IPv6 `fd7a:115c:a1e0::53`). When that MagicDNS
+misbehaves, DNS fails. It's **DNS, not credentials.** Two layers are affected:
+
+| Layer | Uses | Symptom |
+|-------|------|---------|
+| **Host** (`docker pull`, `apt`, host `curl`) | host `/etc/resolv.conf` | `lookup registry-1.docker.io ... server misbehaving` |
+| **Container** (rclone/R2 test, app egress) | Docker embedded `127.0.0.11` → forwards to host resolvers | `lookup ...r2.cloudflarestorage.com on 127.0.0.11:53: server misbehaving` |
+
+This affects **both hosts** (panel VM + remote VPS), since both run Tailscale + Docker.
+
+**Fix — stop Tailscale hijacking host DNS** (fixes both layers):
+
+```bash
+sudo tailscale set --accept-dns=false     # flip the pref off
+sudo systemctl restart docker
+cat /etc/resolv.conf                       # check: is the 100.100.100.100 / fd7a:...::53 line gone?
+docker run --rm alpine nslookup registry-1.docker.io
+```
+
+⚠️ **On OrbStack, `--accept-dns=false` often does NOT restore `/etc/resolv.conf`** —
+Tailscale leaves the dead MagicDNS entry behind, so the pull still fails. When that
+happens, pin public resolvers directly (this is what actually unblocks it):
+
+```bash
+sudo sh -c 'printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/resolv.conf'
+sudo systemctl restart docker
+docker run --rm alpine nslookup registry-1.docker.io   # resolves now
+# Optional — stop anything rewriting it on reboot (regular file only, not a symlink):
+sudo chattr +i /etc/resolv.conf            # undo later with: sudo chattr -i /etc/resolv.conf
+```
+
+Safe here because nodes are reached by **Tailscale IP**, not MagicDNS name.
+(Tailnet-wide alternative: admin console → **DNS** → add global nameserver `1.1.1.1`.)
+
+Fresh installs are already covered — `setup-control-panel-vm.sh` and
+`setup-remote-vps.sh` pass `--accept-dns=false` on join, **and** seed
+`"dns": ["1.1.1.1","8.8.8.8"]` into `/etc/docker/daemon.json` as container-DNS
+defense-in-depth. Re-running either script (idempotent) applies the fix to an
+existing host:
+
+```bash
+# Existing OrbStack panel:
+orb -m dokploy sudo bash -s < scripts/setup-control-panel-vm.sh
+```
