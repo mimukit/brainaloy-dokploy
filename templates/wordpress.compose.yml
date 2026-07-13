@@ -1,0 +1,49 @@
+# Canonical WordPress stack — paste into the Dokploy "Docker Compose" editor.
+# One copy per site; it is IDENTICAL for every site. What changes per site is the
+# ENVIRONMENT block, which you set in Dokploy → Environment (generate it with
+# scripts/new-wordpress-site.sh). Enable "Isolated Deployments" on the service so
+# each site gets its own network. Wire the domain in Dokploy's Domain tab:
+#   service = wordpress, container port = 80, HTTPS + Let's Encrypt.
+services:
+  wordpress:
+    image: wordpress:php8.3-apache
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wp
+      WORDPRESS_DB_PASSWORD: ${WP_DB_PASSWORD}
+      # Trust Traefik's SSL termination + pin the site URLs to https.
+      # NOTE: PHP '$' is escaped as '$$' so Dokploy/Compose does not interpolate it.
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_HOME','https://${SITE_DOMAIN}');
+        define('WP_SITEURL','https://${SITE_DOMAIN}');
+        if (isset($$_SERVER['HTTP_X_FORWARDED_PROTO']) && $$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+          $$_SERVER['HTTPS'] = 'on';
+        }
+    volumes:
+      - wp_content:/var/www/html/wp-content
+    expose:
+      - "80"
+
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    # MariaDB tuning automated here — no manual my.cnf. Tune down if cramming sites.
+    command: >-
+      --innodb-buffer-pool-size=192M
+      --max-connections=50
+      --innodb-log-file-size=64M
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wp
+      MARIADB_PASSWORD: ${WP_DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${WP_DB_ROOT_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+
+volumes:
+  wp_content:
+  db_data:
