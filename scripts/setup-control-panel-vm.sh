@@ -26,10 +26,10 @@ if [[ "$(id -u)" -ne 0 ]]; then
   fi
 fi
 
-echo "==> [1/3] Base CLI tools (curl, tmux, btop, vim, lazydocker)"
+echo "==> [1/4] Base CLI tools"
 export DEBIAN_FRONTEND=noninteractive
 $SUDO apt-get update -qq
-$SUDO apt-get install -y -qq curl tmux btop vim >/dev/null
+$SUDO apt-get install -y -qq curl tmux btop vim bat >/dev/null
 echo "    apt tools ready (curl, tmux, btop, vim)"
 if command -v lazydocker >/dev/null 2>&1; then
   echo "    lazydocker already installed — skipping"
@@ -39,7 +39,7 @@ else
   echo "    lazydocker installed"
 fi
 
-echo "==> [2/3] Tailscale"
+echo "==> [2/4] Tailscale"
 if command -v tailscale >/dev/null 2>&1; then
   echo "    tailscale already installed — skipping"
 else
@@ -47,12 +47,30 @@ else
   echo "    tailscale installed"
 fi
 
-echo "==> [3/3] Dokploy (official installer)"
+echo "==> [3/4] Dokploy (official installer)"
 if $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -q dokploy; then
   echo "    Dokploy already running — skipping install"
 else
   curl -sSL https://dokploy.com/install.sh | $SUDO sh
   echo "    Dokploy installed"
+fi
+
+echo "==> [4/4] Docker socket access (add login user to 'docker' group)"
+# Without this, non-root `docker ...` fails with:
+#   permission denied ... /var/run/docker.sock: connect: permission denied
+# The 'docker' group is created by the Docker install above; adding the login
+# user to it lets them talk to the daemon without sudo.
+DOCKER_USER="${SUDO_USER:-$(id -un)}"
+if [[ "$DOCKER_USER" == "root" ]]; then
+  echo "    Running as root with no login user — nothing to add, skipping"
+elif ! getent group docker >/dev/null 2>&1; then
+  echo "    'docker' group not present yet — skipping"
+elif id -nG "$DOCKER_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+  echo "    $DOCKER_USER already in 'docker' group — skipping"
+else
+  $SUDO usermod -aG docker "$DOCKER_USER"
+  echo "    Added $DOCKER_USER to 'docker' group"
+  echo "    NOTE: log out/in (or run 'newgrp docker') for it to take effect"
 fi
 
 echo
