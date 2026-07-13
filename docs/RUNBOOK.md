@@ -18,7 +18,8 @@ Legend: `[ ]` todo · 🖐 manual UI/auth step · ⛔ verification gate (don't p
 ---
 
 ## Phase 1 — Local Dokploy panel (OrbStack)
-- [ ] Run `scripts/orb-panel-setup.sh`
+- [ ] Create the VM: `scripts/orb-create-vm.sh` (or manually: `orb create ubuntu:24.04 dokploy`)
+- [ ] Provision it: `orb -m dokploy sudo bash -s < scripts/setup-control-panel-vm.sh`
 - [ ] 🖐 Complete `tailscale up` auth in the browser when prompted
 - [ ] Note the **panel Tailscale IP** (`orb -m dokploy sudo tailscale ip -4`): `__________`
 - [ ] Note the **orb machine IP** (`orb list`): `__________`

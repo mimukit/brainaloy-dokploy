@@ -275,14 +275,16 @@ The deterministic parts are scripted in `scripts/`; interactive UI/auth steps st
 
 | Script | Runs on | What it does |
 |--------|---------|--------------|
-| `scripts/orb-panel-setup.sh` | macOS host | Creates the OrbStack Ubuntu machine, installs Tailscale + Dokploy. (Tailscale auth + admin account are interactive.) |
+| `scripts/orb-create-vm.sh` | macOS host | **Optional.** Creates the OrbStack Ubuntu 24.04 machine (equivalent to `orb create ubuntu:24.04 dokploy`). VM only — no apps. |
+| `scripts/setup-control-panel-vm.sh` | Any Ubuntu LTS host | Installs CLI tools (curl, tmux, btop, vim, lazydocker), Tailscale, and Dokploy. Machine-agnostic; run inside the VM. (Tailscale auth + admin account are interactive.) |
 | `scripts/vps-bootstrap.sh` | DO droplet (root) | Swap + swappiness, Docker log rotation, unattended security upgrades, Tailscale. **Does not** install Docker or touch the firewall. |
 | `scripts/vps-firewall-lockdown.sh` | DO droplet (root) | Closes public 22, allows 80/443 + `tailscale0` only. Guarded against lockout; run **last**. |
 | `scripts/new-wordpress-site.sh <domain>` | macOS host | Generates strong DB passwords + a per-site env block and a copy of the compose under `sites/<domain>/` (gitignored). |
 | `templates/wordpress.compose.yml` | — | Canonical WordPress stack to paste into the Dokploy Compose editor. |
 
-Typical order: `orb-panel-setup.sh` → create droplet → `vps-bootstrap.sh` → add server in
-Dokploy UI → `new-wordpress-site.sh` + deploy + verify → `vps-firewall-lockdown.sh`.
+Typical order: `orb-create-vm.sh` (or create the VM by hand) → `setup-control-panel-vm.sh`
+inside it → create droplet → `vps-bootstrap.sh` → add server in Dokploy UI →
+`new-wordpress-site.sh` + deploy + verify → `vps-firewall-lockdown.sh`.
 
 > `sites/` holds generated secrets and is gitignored — keep it off version control.
 
