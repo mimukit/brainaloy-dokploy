@@ -16,7 +16,7 @@ if [[ "$(id -u)" -ne 0 ]]; then echo "Run as root." >&2; exit 1; fi
 
 SWAP_SIZE="${SWAP_SIZE:-4G}"
 
-echo "==> [1/5] Swapfile ($SWAP_SIZE) + swappiness"
+echo "==> [1/6] Swapfile ($SWAP_SIZE) + swappiness"
 if ! swapon --show | grep -q '/swapfile'; then
   fallocate -l "$SWAP_SIZE" /swapfile
   chmod 600 /swapfile
@@ -29,7 +29,7 @@ fi
 echo 'vm.swappiness=10' > /etc/sysctl.d/99-swappiness.conf
 sysctl --system >/dev/null
 
-echo "==> [2/5] Docker log rotation (prevents logs filling a small disk)"
+echo "==> [2/6] Docker log rotation (prevents logs filling a small disk)"
 # Pre-seed daemon.json so container logs are capped once Dokploy installs Docker.
 mkdir -p /etc/docker
 if [[ ! -f /etc/docker/daemon.json ]]; then
@@ -45,18 +45,22 @@ else
   echo "    /etc/docker/daemon.json exists — leaving it alone (merge log-opts manually if needed)"
 fi
 
-echo "==> [3/5] Unattended security upgrades"
+echo "==> [3/6] Unattended security upgrades"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -y
-apt-get install -y unattended-upgrades
-dpkg-reconfigure -f noninteractive unattended-upgrades || true
+if ! dpkg -s unattended-upgrades >/dev/null 2>&1; then
+  apt-get update -y
+  apt-get install -y unattended-upgrades
+  dpkg-reconfigure -f noninteractive unattended-upgrades || true
+else
+  echo "    unattended-upgrades already installed — skipping"
+fi
 
-echo "==> [4/5] Install Tailscale"
+echo "==> [4/6] Install Tailscale"
 if ! command -v tailscale >/dev/null 2>&1; then
   curl -fsSL https://tailscale.com/install.sh | sh
 fi
 
-echo "==> [5/5] Join tailnet"
+echo "==> [5/6] Join tailnet"
 if tailscale status >/dev/null 2>&1; then
   echo "    already connected: $(tailscale ip -4 2>/dev/null || true)"
 elif [[ -n "${TS_AUTHKEY:-}" ]]; then
@@ -65,6 +69,38 @@ elif [[ -n "${TS_AUTHKEY:-}" ]]; then
 else
   echo "    No TS_AUTHKEY provided. Run interactively:  tailscale up"
   echo "    Then note the IP with:  tailscale ip -4"
+fi
+
+echo "==> [6/6] Enforce key-only SSH (disable password + PAM auth)"
+# GUARD: refuse to disable password auth unless a usable public key already
+# exists — otherwise a keyless box would lock everyone out. Safe to re-run:
+# add Dokploy's key to ~/.ssh/authorized_keys, then run this script again.
+AUTH_KEYS="${HOME}/.ssh/authorized_keys"
+HARDEN_CONF="/etc/ssh/sshd_config.d/99-hardening.conf"
+read -r -d '' HARDEN_BODY <<'CONF' || true
+# Managed by setup-remote-vps.sh — key-only SSH.
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+UsePAM no
+PubkeyAuthentication yes
+CONF
+if [[ -f "$HARDEN_CONF" ]] && [[ "$(cat "$HARDEN_CONF")" == "$HARDEN_BODY" ]]; then
+  echo "    key-only SSH already enforced — skipping"
+elif [[ -s "$AUTH_KEYS" ]] && grep -qE '^(ssh-(rsa|ed25519|dss)|ecdsa-)' "$AUTH_KEYS"; then
+  mkdir -p /etc/ssh/sshd_config.d
+  printf '%s\n' "$HARDEN_BODY" > "$HARDEN_CONF"
+  # Validate before reloading so a bad config never breaks the SSH service.
+  if sshd -t; then
+    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+    echo "    Password + PAM auth disabled; key-only SSH is now enforced."
+  else
+    rm -f "$HARDEN_CONF"
+    echo "    ⚠️  sshd config test failed — reverted, leaving SSH unchanged." >&2
+  fi
+else
+  echo "    ⚠️  No public key found in $AUTH_KEYS — SKIPPING (would lock you out)."
+  echo "        Add Dokploy's SSH public key there, then re-run this script."
 fi
 
 echo
