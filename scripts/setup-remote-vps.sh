@@ -2,11 +2,11 @@
 # One-time DigitalOcean droplet prep, BEFORE adding it to Dokploy.
 # Idempotent: safe to re-run. Run as root on a fresh Ubuntu LTS droplet.
 #
-#   scp scripts/vps-bootstrap.sh root@<droplet-ip>:/root/
-#   ssh root@<droplet-ip> 'bash /root/vps-bootstrap.sh'
+#   scp scripts/setup-remote-vps.sh root@<droplet-ip>:/root/
+#   ssh root@<droplet-ip> 'bash /root/setup-remote-vps.sh'
 #
 # Optional non-interactive Tailscale join:
-#   TS_AUTHKEY=tskey-auth-xxxx bash /root/vps-bootstrap.sh
+#   TS_AUTHKEY=tskey-auth-xxxx bash /root/setup-remote-vps.sh
 #
 # Does NOT install Docker — Dokploy installs Docker/Traefik during provisioning.
 # Does NOT close the firewall — that is a separate, later step (vps-firewall-lockdown.sh).

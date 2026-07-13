@@ -277,13 +277,13 @@ The deterministic parts are scripted in `scripts/`; interactive UI/auth steps st
 |--------|---------|--------------|
 | `scripts/orb-create-vm.sh` | macOS host | **Optional.** Creates the OrbStack Ubuntu 24.04 machine (equivalent to `orb create ubuntu:24.04 dokploy`). VM only — no apps. |
 | `scripts/setup-control-panel-vm.sh` | Any Ubuntu LTS host | Installs CLI tools (curl, tmux, btop, vim, lazydocker), Tailscale, and Dokploy. Machine-agnostic; run inside the VM. (Tailscale auth + admin account are interactive.) |
-| `scripts/vps-bootstrap.sh` | DO droplet (root) | Swap + swappiness, Docker log rotation, unattended security upgrades, Tailscale. **Does not** install Docker or touch the firewall. |
+| `scripts/setup-remote-vps.sh` | DO droplet (root) | Swap + swappiness, Docker log rotation, unattended security upgrades, Tailscale. **Does not** install Docker or touch the firewall. |
 | `scripts/vps-firewall-lockdown.sh` | DO droplet (root) | Closes public 22, allows 80/443 + `tailscale0` only. Guarded against lockout; run **last**. |
 | `scripts/new-wordpress-site.sh <domain>` | macOS host | Generates strong DB passwords + a per-site env block and a copy of the compose under `sites/<domain>/` (gitignored). |
 | `templates/wordpress.compose.yml` | — | Canonical WordPress stack to paste into the Dokploy Compose editor. |
 
 Typical order: `orb-create-vm.sh` (or create the VM by hand) → `setup-control-panel-vm.sh`
-inside it → create droplet → `vps-bootstrap.sh` → add server in Dokploy UI →
+inside it → create droplet → `setup-remote-vps.sh` → add server in Dokploy UI →
 `new-wordpress-site.sh` + deploy + verify → `vps-firewall-lockdown.sh`.
 
 > `sites/` holds generated secrets and is gitignored — keep it off version control.
@@ -294,7 +294,7 @@ inside it → create droplet → `vps-bootstrap.sh` → add server in Dokploy UI
 
 - **DO Reserved IP** for the droplet — so a rebuild/resize keeps the same public IP and your DNS + Let's Encrypt don't churn.
 - **Tailscale hardening** — tag the servers (e.g. `tag:prod`), **disable key expiry** on the VPS + panel nodes (so they don't drop off the tailnet), and tighten tailnet ACLs to only what the panel needs.
-- **Docker log rotation** — handled by `vps-bootstrap.sh`; re-apply if Dokploy ever rewrites `/etc/docker/daemon.json`.
+- **Docker log rotation** — handled by `setup-remote-vps.sh`; re-apply if Dokploy ever rewrites `/etc/docker/daemon.json`.
 - **DO droplet snapshots** — cheap whole-box safety net *in addition to* UpdraftPlus (weekly is plenty).
 - **Uptime + cert monitoring** — a free external monitor (UptimeRobot/Healthchecks) per site catches outages and cert-renewal failures the offline panel won't tell you about.
 - **WordPress hardening per site** — `define('DISALLOW_FILE_EDIT', true);`, limit-login plugin, strong admin creds, keep core/plugins updated.

@@ -39,8 +39,8 @@ Legend: `[ ]` todo · 🖐 manual UI/auth step · ⛔ verification gate (don't p
 - [ ] 🖐 Create droplet: **latest Ubuntu LTS**, **2 GB / 1 vCPU**, plain image, your root SSH key
 - [ ] 🖐 (Recommended) Assign a **Reserved IP** to the droplet
 - [ ] Record droplet **public IP**: `__________`
-- [ ] Copy bootstrap up: `scp scripts/vps-bootstrap.sh root@<public-ip>:/root/`
-- [ ] Run it: `ssh root@<public-ip> 'bash /root/vps-bootstrap.sh'`
+- [ ] Copy bootstrap up: `scp scripts/setup-remote-vps.sh root@<public-ip>:/root/`
+- [ ] Run it: `ssh root@<public-ip> 'bash /root/setup-remote-vps.sh'`
 - [ ] 🖐 If not using `TS_AUTHKEY`: `ssh root@<public-ip> tailscale up` and auth
 - [ ] Record droplet **Tailscale IP**: `__________`
 - [ ] 🖐 Tailscale admin console → **disable key expiry** for panel + VPS nodes; tag them (e.g. `tag:prod`)
