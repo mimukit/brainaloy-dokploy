@@ -88,8 +88,18 @@ if the site serves `www`.
 
 - [ ] 🖐 Cache eligibility → **Eligible for cache**
 - [ ] 🖐 Edge TTL → **Override origin** → **7 days** (`604800` seconds) — drop to 1 day if a site changes more often
+- [ ] 🖐 Edge TTL → **Add status code TTL** to keep error responses out of cache (see warning below):
+  - `200`–`299` → **7 days** · `301`/`302` → **7 days**
+  - `404` → **No-store** (or 1 minute) · `500`–`599` → **No-store**
 - [ ] 🖐 Browser TTL → **Override origin** → **4 hours** — keep short so returning visitors re-check the edge and pick up purges quickly
 - [ ] 🖐 Save
+
+> ⚠️ **Do not skip the status-code TTL.** A blanket "Override origin" caches
+> *every* status code, including errors. If the origin is down during a deploy
+> or an Always Online drill, the Dokploy/Traefik router returns a plain-text
+> `404 page not found`, and Cloudflare will pin **that 404 for the full 7-day
+> Edge TTL** — the page stays broken long after the origin recovers. Restricting
+> long TTLs to `2xx`/`3xx` and never-caching `404`/`5xx` prevents this.
 
 > Do **not** use the legacy "Page Rules" — Cache Rules are the current, more
 > granular replacement and take precedence.
@@ -139,6 +149,21 @@ that zone's Edge TTL (Step 2) to **1 day** or a few hours as a safety net.
 
 ---
 
+## Troubleshooting — one page 404s while the rest work
+
+Symptom: a single URL (e.g. `/about-us/`) returns **404** for everyone, but
+loads fine everywhere else.
+
+- [ ] Confirm it's a **cached** error, not the origin:
+      - `http GET https://DOMAIN/about-us/` → `cf-cache-status: HIT`, body `404 page not found` (plain text = the Traefik router, not WordPress).
+      - `http GET "https://DOMAIN/about-us/?cb=123"` (cache-busting query) → `200` with the real page = origin is healthy, the cache is stale.
+- [ ] **Fix:** Custom Purge that exact URL (**Caching → Purge Cache → Custom Purge**).
+- [ ] **Root cause / prevention:** a `404`/`5xx` got cached while the container
+      was down (deploy, restart, or an Always Online drill). Make sure the
+      **status-code TTL** from Step 2 is set so errors are never stored.
+
+---
+
 ## Caveats for these sites
 
 - **Contact forms:** POST submissions are never cached. If a form embeds a nonce in the HTML, a multi-day Edge TTL can serve a stale nonce and the submit fails. If a site has a form, either keep that zone's Edge TTL to ~1 day, or add the form page's path to the Step 1 bypass expression.
@@ -152,6 +177,7 @@ that zone's Edge TTL (Step 2) to **1 day** or a few hours as a safety net.
 - [ ] DNS record flipped to **Proxied (orange)**
 - [ ] Rule 1 `WP bypass dynamic` created (top priority)
 - [ ] Rule 2 `WP cache all HTML` created (below rule 1), Edge TTL set
+- [ ] Status-code TTL set so `404`/`5xx` are **not** cached
 - [ ] Always Online **ON**
 - [ ] Smart Tiered Caching **ON**
 - [ ] Verified `MISS → HIT` on a public page, `BYPASS` on `/wp-admin/`
