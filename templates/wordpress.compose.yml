@@ -18,14 +18,6 @@ services:
       - WORDPRESS_DB_USER=$SERVICE_USER_WORDPRESS
       - WORDPRESS_DB_PASSWORD=$SERVICE_PASSWORD_WORDPRESS
       - WORDPRESS_DB_NAME=wordpress
-      # Trust Traefik's SSL termination so WordPress knows the request is HTTPS.
-      # No WP_HOME/WP_SITEURL is pinned: the URL comes from the request/DB, which
-      # keeps backup restores and later domain-wiring working without edits here.
-      # NOTE: PHP '$' is escaped as '$$' so Dokploy/Compose does not interpolate it.
-      WORDPRESS_CONFIG_EXTRA: |
-        if (isset($$_SERVER['HTTP_X_FORWARDED_PROTO']) && $$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
-          $$_SERVER['HTTPS'] = 'on';
-        }
     volumes:
       - wp_content:/var/www/html/wp-content
     healthcheck:
