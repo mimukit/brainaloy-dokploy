@@ -30,7 +30,7 @@ and serves traffic **independently of the panel**.
 | Persistence | **Named volumes** for `wp-content` and DB (relative bind mounts get wiped on redeploy). |
 | Domains/TLS | Dokploy **Compose Domain UI** → container port 80 → **Let's Encrypt**. DNS-only (grey-cloud). |
 | Site definitions | **Pasted in the Dokploy UI** for now (lives in panel Postgres → covered by R2 System Backup). |
-| Droplet | **2 GB / 1 vCPU**, **latest Ubuntu LTS flat image**, **4 GB swapfile**, `vm.swappiness=10`. ~2–3 small sites/box. |
+| Droplet | **2 GB / 1 vCPU**, **latest Ubuntu LTS flat image**, **4 GB swapfile**, `vm.swappiness=10`. ~2 small sites/box. |
 | MariaDB tuning | **Automated in the compose file** via `command:` args (`--innodb-buffer-pool-size` etc.). No manual `my.cnf`. |
 | Site backups | **UpdraftPlus** WordPress plugin (site content + DB) → its own remote. |
 | Panel backups | **Dokploy System Backup → Cloudflare R2**, **manual after any panel change** (config is near-static). No schedule, no lifecycle rules, keep many. |
@@ -202,10 +202,18 @@ The stack is **identical for every site** — no per-site edits. It's kept in
 volumes. No domain is baked in, so create → restore → wire the domain all work
 without touching the file.
 
+Every resource ceiling (RAM, swap, CPU, Apache workers, DB buffer pool and
+connections) is an environment variable with a working default, so you scale one
+site from its Dokploy **Environment** tab instead of editing the compose. The
+compose file itself carries no comments; the tunables, the formulas for sizing
+them, and the reasoning all live in
+[`docs/WORDPRESS-STACK-TUNING.md`](docs/WORDPRESS-STACK-TUNING.md).
+
 > **Adding more sites:** paste the same compose into a new Compose service and
-> deploy — Dokploy generates fresh `SERVICE_*` credentials per service. Budget
-> ~300–400 MB RAM per site; at ~2–3 sites on 2 GB, add a second droplet as another
-> Dokploy server rather than overloading one box.
+> deploy — Dokploy generates fresh `SERVICE_*` credentials per service. Each site
+> reserves **672 MiB** (wordpress 384 + db 288), so a 2 GB box holds **2 sites**
+> once the OS and Traefik take their share. For a third site, add a second droplet
+> as another Dokploy server rather than overloading one box.
 
 > **Restore note (volumes):** if you ever restore a volume, Dokploy names Compose
 > volumes `{appName}_{volumeName}` — match that so the restored volume is picked up.
