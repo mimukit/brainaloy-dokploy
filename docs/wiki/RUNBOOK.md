@@ -80,6 +80,8 @@ Legend: `[ ]` todo · 🖐 manual UI/auth step · ⛔ verification gate (don't p
 - [ ] ⛔ Public `ssh root@<public-ip>` now **times out**
 - [ ] ⛔ Site still serves over HTTPS (80/443 unaffected)
 - [ ] 🖐 Confirm **DO web console** opens (break-glass path)
+- [ ] Copy up: `scp scripts/vps-audit.sh root@<tailscale-ip>:/root/`
+- [ ] ⛔ Run the audit: `ssh root@<tailscale-ip> 'bash /root/vps-audit.sh'` → **all PASS** (a WARN for "Docker daemon.json" only appears if Dokploy hasn't provisioned yet)
 
 ---
 

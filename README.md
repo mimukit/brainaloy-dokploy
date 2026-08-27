@@ -243,6 +243,7 @@ The deterministic parts are scripted in `scripts/`; interactive UI/auth steps st
 | `scripts/setup-control-panel-vm.sh` | Any Ubuntu LTS host | Installs CLI tools (curl, tmux, btop, vim, lazydocker), Tailscale, and Dokploy. Machine-agnostic; run inside the VM. (Tailscale auth + admin account are interactive.) |
 | `scripts/setup-remote-vps.sh` | DO droplet (root) | Swap + swappiness, Docker log rotation, unattended security upgrades, Tailscale. **Does not** install Docker or touch the firewall. |
 | `scripts/vps-firewall-lockdown.sh` | DO droplet (root) | Closes public 22, allows 80/443 + `tailscale0` only. Guarded against lockout; run **last**. |
+| `scripts/vps-audit.sh` | DO droplet (root) | Read-only check that the two scripts above did their job: swap, SSH effective config (`sshd -T`), ufw policy, Tailscale, Docker daemon config, DNS, disk/memory. Run after lockdown; expect all PASS. Exit 1 on any FAIL. |
 | `templates/wordpress.compose.yml` | — | Canonical WordPress stack to paste into the Dokploy Compose editor. Identical for every site; no env vars needed (Dokploy generates the `SERVICE_*` DB credentials). |
 
 Typical order: `orb-create-vm.sh` (or create the VM by hand) → `setup-control-panel-vm.sh`

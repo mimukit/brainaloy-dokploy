@@ -13,6 +13,6 @@ Cheap single-purpose DigitalOcean VPS servers run production WordPress sites. A 
 
 - [templates/wordpress.compose.yml](https://github.com/mimukit/brainaloy-dokploy/blob/main/templates/wordpress.compose.yml) — the canonical stack pasted into the Dokploy Compose editor, identical for every site.
 - [templates/wordpress.env.example](https://github.com/mimukit/brainaloy-dokploy/blob/main/templates/wordpress.env.example) — every tunable with its default; an empty Environment tab deploys the defaults.
-- [scripts/](https://github.com/mimukit/brainaloy-dokploy/tree/main/scripts) — provisioning scripts for the panel VM and the VPS, plus the firewall lockdown.
+- [scripts/](https://github.com/mimukit/brainaloy-dokploy/tree/main/scripts) — provisioning scripts for the panel VM and the VPS, plus the firewall lockdown and the post-lockdown audit.
 
 _Verified against `main`@`7625573` on 2026-08-27._
