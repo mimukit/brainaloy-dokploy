@@ -1,0 +1,25 @@
+home: docs/wiki
+engine: none
+pages:
+  - path: index.md
+    mode: none
+    documents: [docs/wiki/**, README.md]
+  - path: ../../README.md
+    mode: explanation
+    adopted: true
+    documents: [scripts/**, templates/**, docs/wiki/RUNBOOK.md]
+  - path: RUNBOOK.md
+    mode: how-to
+    adopted: true
+    documents: [scripts/**, templates/wordpress.compose.yml]
+  - path: WORDPRESS-STACK-TUNING.md
+    mode: reference
+    adopted: true
+    documents: [templates/wordpress.compose.yml, templates/wordpress.env.example, scripts/setup-remote-vps.sh]
+  - path: CLOUDFLARE-CACHING.md
+    mode: how-to
+    adopted: true
+    documents: [docs/wiki/RUNBOOK.md]
+  - path: RESTORE.md
+    mode: how-to
+    documents: [scripts/**, templates/wordpress.compose.yml, docs/wiki/RUNBOOK.md]

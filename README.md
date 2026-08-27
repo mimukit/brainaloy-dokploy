@@ -5,7 +5,7 @@ WordPress sites, controlled from a **local Dokploy panel** running on macOS via
 OrbStack. **Tailscale** is the private management bridge; public web traffic
 stays on the open internet.
 
-> **Building it?** Follow the tick-through checklist in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+> **Building it?** Follow the tick-through checklist in [`docs/wiki/RUNBOOK.md`](docs/wiki/RUNBOOK.md).
 > This README is the reasoning + reference behind those steps.
 
 ---
@@ -207,7 +207,7 @@ connections) is an environment variable with a working default, so you scale one
 site from its Dokploy **Environment** tab instead of editing the compose. The
 compose file itself carries no comments; the tunables, the formulas for sizing
 them, and the reasoning all live in
-[`docs/WORDPRESS-STACK-TUNING.md`](docs/WORDPRESS-STACK-TUNING.md).
+[`docs/wiki/WORDPRESS-STACK-TUNING.md`](docs/wiki/WORDPRESS-STACK-TUNING.md).
 
 > **Adding more sites:** paste the same compose into a new Compose service and
 > deploy — Dokploy generates fresh `SERVICE_*` credentials per service. Each site

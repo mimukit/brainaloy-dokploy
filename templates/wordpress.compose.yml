@@ -1,5 +1,5 @@
 # Canonical WordPress stack for Dokploy. Identical for every site.
-# Tunables, defaults, and the reasoning behind them: docs/WORDPRESS-STACK-TUNING.md
+# Tunables, defaults, and the reasoning behind them: docs/wiki/WORDPRESS-STACK-TUNING.md
 services:
   wordpress:
     image: wordpress:7-php8.5-apache

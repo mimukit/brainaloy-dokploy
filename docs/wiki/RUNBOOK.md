@@ -1,7 +1,7 @@
 # Runbook — Build Checklist
 
 Ordered, tick-through checklist for standing up the whole setup. Prose/reasoning
-lives in `../README.md`; this is just the do-it list. **Do phases in order** — the
+lives in `../../README.md`; this is just the do-it list. **Do phases in order** — the
 firewall lockdown (Phase 5) is intentionally last to avoid SSH lockout.
 
 Legend: `[ ]` todo · 🖐 manual UI/auth step · ⛔ verification gate (don't proceed until it passes)

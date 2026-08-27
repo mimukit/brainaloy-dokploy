@@ -1,6 +1,6 @@
 # WordPress Stack Tuning
 
-Reference for [`templates/wordpress.compose.yml`](../templates/wordpress.compose.yml).
+Reference for [`templates/wordpress.compose.yml`](../../templates/wordpress.compose.yml).
 The compose file carries no comments on purpose. Everything that explains it lives here.
 
 Every site pastes the same compose file. You change a site's resources by setting
@@ -75,7 +75,7 @@ DB_CPUS=1.5
 
 The `SERVICE_*` database credentials are separate. Dokploy generates those per
 service and you never set them by hand. See
-[`templates/wordpress.env.example`](../templates/wordpress.env.example).
+[`templates/wordpress.env.example`](../../templates/wordpress.env.example).
 
 ---
 
