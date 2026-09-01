@@ -1,0 +1,67 @@
+# Beszel hub + Tailscale sidecar. Deploy this on ONE server only.
+# The hub joins the tailnet as its own node and is reachable only over Tailscale.
+# Setup, tokens, and agent pairing: docs/BESZEL-MONITORING.md
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.102
+    restart: unless-stopped
+    hostname: ${TS_HOSTNAME:-beszel}
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_USERSPACE=false
+      - TS_EXTRA_ARGS=${TS_EXTRA_ARGS:---accept-dns=false}
+    volumes:
+      - ts_state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    mem_limit: ${TS_MEM_LIMIT:-128m}
+    mem_reservation: ${TS_MEM_RESERVATION:-32m}
+    cpus: ${TS_CPUS:-0.25}
+    pids_limit: ${TS_PIDS_LIMIT:-64}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-10m}
+        max-file: ${LOG_MAX_FILE:-3}
+    healthcheck:
+      test: ["CMD", "tailscale", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  beszel:
+    image: henrygd/beszel:0.18
+    restart: unless-stopped
+    # Share the sidecar network namespace: port 8090 is published on the
+    # tailnet node, not on the public interface.
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    environment:
+      - APP_URL=${APP_URL:-http://beszel:8090}
+      - DISABLE_PASSWORD_AUTH=${DISABLE_PASSWORD_AUTH:-false}
+    volumes:
+      - beszel_data:/beszel_data
+    mem_limit: ${HUB_MEM_LIMIT:-256m}
+    mem_reservation: ${HUB_MEM_RESERVATION:-64m}
+    cpus: ${HUB_CPUS:-0.5}
+    pids_limit: ${HUB_PIDS_LIMIT:-128}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-10m}
+        max-file: ${LOG_MAX_FILE:-3}
+
+# Agents are NOT part of this stack. Install the agent as a host binary on every
+# VM, including this one, with the script in docs/BESZEL-MONITORING.md. On this
+# VM the agent cannot see the hub on 127.0.0.1, because the hub lives in the
+# sidecar namespace. Point its hub URL at the hub's Tailscale address.
+
+volumes:
+  ts_state:
+  beszel_data:
