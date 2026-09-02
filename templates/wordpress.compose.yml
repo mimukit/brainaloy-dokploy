@@ -28,10 +28,10 @@ services:
         max-size: ${LOG_MAX_SIZE:-10m}
         max-file: ${LOG_MAX_FILE:-3}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "-o", "/dev/null", "http://127.0.0.1/wp-includes/js/wp-embed.min.js"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
       start_period: 60s
 
   db:
