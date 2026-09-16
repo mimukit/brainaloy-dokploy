@@ -1,0 +1,43 @@
+# brainaloy-vps-cf-tunnel: Cloudflare Tunnel connector for Workers VPC egress.
+# Outbound only: it publishes no port and needs no Dokploy domain. A Worker with a
+# VPC Service binding sends requests through this tunnel, so the upstream sees this
+# VPS public IP. Setup and operations: brainaloy-vps-cf-tunnel/README.md
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.1
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:2000 run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    # Two connectors on the same tunnel. A restart or redeploy of one replica does not
+    # stop egress. They do not protect against a VPS outage.
+    deploy:
+      replicas: ${CF_REPLICAS:-2}
+    # The image runs as nonroot and needs no capability or writable root filesystem.
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Own bridge network: the connector cannot reach other stacks by container name.
+    networks:
+      - egress
+    mem_limit: ${CF_MEM_LIMIT:-128m}
+    mem_reservation: ${CF_MEM_RESERVATION:-32m}
+    cpus: ${CF_CPUS:-0.25}
+    pids_limit: ${CF_PIDS_LIMIT:-64}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-10m}
+        max-file: ${LOG_MAX_FILE:-3}
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+networks:
+  egress:
+    driver: bridge

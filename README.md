@@ -246,6 +246,7 @@ The deterministic parts are scripted in `scripts/`; interactive UI/auth steps st
 | `scripts/vps-audit.sh` | DO droplet (root) | Read-only check that the two scripts above did their job: swap, SSH effective config (`sshd -T`), ufw policy, Tailscale, Docker daemon config, DNS, disk/memory. Run after lockdown; expect all PASS. Exit 1 on any FAIL. |
 | `templates/wordpress.compose.yml` | — | Canonical WordPress stack to paste into the Dokploy Compose editor. Identical for every site; no env vars needed (Dokploy generates the `SERVICE_*` DB credentials). |
 | `templates/beszel-hub.compose.yml` | — | Beszel monitoring hub + Tailscale sidecar. One per tailnet; the UI is reachable over Tailscale only. Agents install as a host binary, not as a stack. See [`docs/wiki/BESZEL-MONITORING.md`](docs/wiki/BESZEL-MONITORING.md). |
+| `brainaloy-vps-cf-tunnel/` | Dokploy + macOS host | Fixed egress IP for Cloudflare Workers: a `cloudflared` Compose stack plus `services.sh`, which syncs the allowed upstreams in `services.conf` to Workers VPC. See its [`README.md`](brainaloy-vps-cf-tunnel/README.md). |
 
 Typical order: `orb-create-vm.sh` (or create the VM by hand) → `setup-control-panel-vm.sh`
 inside it → create droplet → `setup-remote-vps.sh` → add server in Dokploy UI →
