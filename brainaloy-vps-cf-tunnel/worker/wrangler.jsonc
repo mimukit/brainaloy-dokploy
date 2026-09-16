@@ -1,0 +1,21 @@
+{
+  "name": "brainaloy-vps-cf-tunnel",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  // Preview URLs would open a second, per-version hostname; the token still guards it, but there is no
+  // need for it, so keep it off.
+  "preview_urls": false,
+  "observability": {
+    "enabled": true
+  },
+  // One entry per services.conf line that callers reach over HTTP. Get ids from ../services.sh bindings.
+  "vpc_services": [
+    {
+      "binding": "EGRESS_KHUDEBARTA",
+      "service_id": "01a0aab8-6b16-7c53-a322-435e7e00d71d",
+      "remote": true
+    }
+  ]
+  // Secret: BRAINALOY_VPS_CF_TUNNEL_TOKEN (npx wrangler secret put BRAINALOY_VPS_CF_TUNNEL_TOKEN)
+}

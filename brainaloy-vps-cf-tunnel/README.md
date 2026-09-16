@@ -15,6 +15,7 @@ Worker ──env.EGRESS_KHUDEBARTA.fetch()──▶ Cloudflare ──tunnel─�
 | `compose.yml` | The `cloudflared` stack for Dokploy. Two connectors, outbound only, read-only filesystem, no capabilities. |
 | `services.conf` | One line per upstream: a VPC Service name and a base URL. |
 | `services.sh` | Creates or updates the VPC Services from `services.conf`, and prints the Worker bindings. |
+| `worker/` | `brainaloy-vps-cf-tunnel`, a shared Worker that forwards HTTP calls to the bindings, so a project needs only a URL. |
 
 ## Evidence
 
@@ -98,6 +99,32 @@ Rules for the provider:
 - Treat `destination_unavailable` as "tunnel down". A deployed Worker gets it as a thrown error. `wrangler dev` returns it as an HTTP 500 with the body `ProxyError: destination_unavailable`. Do not retry an SMS send, because the gateway can bill a message before a connection fails.
 - A plain Worker `fetch()` drops a custom port from an `http` URL. Through the binding, the port comes from the VPC Service, so `http://118.67.213.114:3775` works.
 - Keep `KHUDEBARTA_API_URL` in `.dev.vars` and in `wrangler secret put` identical to `services.conf`.
+
+## Use the shared egress Worker
+
+A project that cannot add a binding (a non-Worker app, or a Worker in another account) uses the `brainaloy-vps-cf-tunnel` Worker in `worker/`. It forwards `/<provider>/<token>/<path>` to the binding for that provider, and returns the upstream response as it is.
+
+Deploy it once:
+
+1. Run `cd worker`.
+2. Run `npx wrangler@4.132.0 secret put BRAINALOY_VPS_CF_TUNNEL_TOKEN`, and enter a long random value, for example from `openssl rand -hex 32`.
+3. Run `npx wrangler@4.132.0 deploy`.
+
+In each project, set the provider URL to the Worker path:
+
+```
+KHUDEBARTA_URL=https://brainaloy-vps-cf-tunnel.<subdomain>.workers.dev/khudebarta/<BRAINALOY_VPS_CF_TUNNEL_TOKEN>
+```
+
+The client then calls `${KHUDEBARTA_URL}/sendtext` as before. Rules:
+
+- A wrong token or an unknown provider returns 404.
+- A tunnel failure returns 502 with `Egress failed: ...`. The Worker does not retry.
+- The token is in the URL, so keep the whole URL a secret, and rotate `BRAINALOY_VPS_CF_TUNNEL_TOKEN` if it leaks.
+- The Worker returns redirects as they are and stops a call after 15 s.
+- For local tests, put `BRAINALOY_VPS_CF_TUNNEL_TOKEN=<value>` in `worker/.dev.vars` (git-ignored), and run `npx wrangler@4.132.0 dev`. The binding is remote, so a call goes to the real gateway.
+
+To add a provider to the Worker, add its binding to `worker/wrangler.jsonc` and its base URL to `PROVIDERS` in `worker/src/index.js`, then deploy.
 
 ## Add a provider
 
