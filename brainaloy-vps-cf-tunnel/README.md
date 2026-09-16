@@ -126,6 +126,56 @@ The client then calls `${KHUDEBARTA_URL}/sendtext` as before. Rules:
 
 To add a provider to the Worker, add its binding to `worker/wrangler.jsonc` and its base URL to `PROVIDERS` in `worker/src/index.js`, then deploy.
 
+## Hyperdrive to Postgres
+
+The same tunnel carries [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) traffic to the production Postgres on the VPS. The database needs no public port.
+
+```
+Worker ──env.HYPERDRIVE──▶ Hyperdrive ──VPC Service (tcp)──▶ cloudflared ──▶ 100.120.15.77:5434 ──▶ Postgres
+```
+
+`services.conf` has the line `db-postgres-production postgres://100.120.15.77:5434`. The host is the VPS tailnet address, so the target stays the same after the public bind is removed. A `postgres://` line becomes a TCP service with `--app-protocol postgresql`, and `./services.sh bindings` skips it.
+
+Set it up:
+
+1. Run `./services.sh apply`.
+2. Run `./services.sh list`, and copy the id of `db-postgres-production`.
+3. Create the Hyperdrive config. The password goes to Cloudflare, so type it in your own shell:
+
+   ```sh
+   npx wrangler@4.132.0 hyperdrive create brainaloy-postgres-production \
+     --service-id <service id> \
+     --database <db name> --user <db user> --password '<db password>'
+   ```
+
+4. Add the binding to the API Worker's `wrangler.jsonc`, in every named environment:
+
+   ```jsonc
+   "hyperdrive": [
+     { "binding": "HYPERDRIVE", "id": "<hyperdrive id>", "localConnectionString": "postgres://<user>:<password>@100.120.15.77:5434/<db>" }
+   ]
+   ```
+
+5. In the Worker, connect with `env.HYPERDRIVE.connectionString`, for example `postgres(env.HYPERDRIVE.connectionString, { max: 5, fetch_types: false })`. Turn on `nodejs_compat`.
+
+`localConnectionString` lets `wrangler dev` connect straight over Tailscale from your Mac. Keep it in a git-ignored file or in the `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` environment variable, not in git.
+
+Rules:
+
+- Give Hyperdrive its own database role with only the rights the API needs. Do not use the `postgres` superuser.
+- The tunnel encrypts the path from Cloudflare to the VPS. Postgres on the VPS does not need TLS for this path.
+- Hyperdrive caches `SELECT` results for 60 s by default. Add `--caching-disabled` to the create command if the API needs fresh reads.
+- If the tunnel is down, a query fails with a connection error. The API has no fallback path to the database.
+
+### Close the public port
+
+Dokploy publishes the external port as `0.0.0.0:5434`, and Docker port rules skip UFW. The port can be open to the internet even with UFW active. Hyperdrive does not need the external port, but Tailscale access from your Mac does. Close public access with one of these:
+
+- Remove the external port in Dokploy, and connect from your Mac with `ssh -L 5434:<postgres container IP>:5432 root@brainaloy-ovh`. This also removes the `100.120.15.77:5434` target, so change `services.conf` to a Docker address first.
+- Keep the external port, and drop public traffic in the `DOCKER-USER` chain: `iptables -I DOCKER-USER -i <public interface> -p tcp -m conntrack --ctorigdstport 5434 -j DROP`. Make the rule persistent. Do the same for `5435`.
+
+Check from a machine off the tailnet: `nc -z -G 5 139.99.90.200 5434` must fail.
+
 ## Add a provider
 
 1. Add a line to `services.conf`, in the form `egress-<provider> <base-url>`, for example `egress-acme https://api.acme-sms.example`.

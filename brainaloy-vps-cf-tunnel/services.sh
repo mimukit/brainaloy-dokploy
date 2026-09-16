@@ -5,6 +5,8 @@
 #   ./services.sh list      # show the services in services.conf and their ids
 #   ./services.sh bindings  # print vpc_services entries for a Worker's wrangler.jsonc
 #
+# A postgres:// line becomes a TCP service for Hyperdrive. It gets no Worker binding.
+#
 # Needs: node, `npx wrangler login`, and TUNNEL_ID in the environment or in .env.
 # It never deletes a service. Delete by hand: npx wrangler vpc service delete <id>
 set -euo pipefail
@@ -36,10 +38,13 @@ conf_lines() {
       const [name, raw] = process.argv.slice(1);
       let u;
       try { u = new URL(raw); } catch { console.error(`services.conf: bad URL for ${name}`); process.exit(1); }
-      if (u.protocol !== "http:" && u.protocol !== "https:") {
-        console.error(`services.conf: ${name} must use http or https`); process.exit(1);
+      if (!["http:", "https:", "postgres:"].includes(u.protocol)) {
+        console.error(`services.conf: ${name} must use http, https or postgres`); process.exit(1);
       }
       const scheme = u.protocol.slice(0, -1);
+      if (scheme === "postgres" && !u.port) {
+        console.error(`services.conf: ${name} needs an explicit port`); process.exit(1);
+      }
       const host = u.hostname.replace(/^\[|\]$/g, "");
       const kind = net.isIPv4(host) ? "ipv4" : net.isIPv6(host) ? "ipv6" : "hostname";
       console.log(name, scheme, kind, host, u.port || (scheme === "https" ? "443" : "80"));
@@ -64,11 +69,12 @@ case "$CMD" in
   apply)
     [[ -n "${TUNNEL_ID:-}" ]] || die "set TUNNEL_ID, or put TUNNEL_ID=<uuid> in $DIR/.env"
     while read -r name scheme kind host port; do
-      args=(--type http --tunnel-id "$TUNNEL_ID" "--$kind" "$host")
-      if [[ "$scheme" == https ]]; then
-        args+=(--https-port "$port" --cert-verification-mode verify_full)
+      if [[ "$scheme" == postgres ]]; then
+        args=(--type tcp --tunnel-id "$TUNNEL_ID" "--$kind" "$host" --tcp-port "$port" --app-protocol postgresql)
+      elif [[ "$scheme" == https ]]; then
+        args=(--type http --tunnel-id "$TUNNEL_ID" "--$kind" "$host" --https-port "$port" --cert-verification-mode verify_full)
       else
-        args+=(--http-port "$port")
+        args=(--type http --tunnel-id "$TUNNEL_ID" "--$kind" "$host" --http-port "$port")
       fi
       id="$(remote_id "$name")"
       if [[ -n "$id" ]]; then
@@ -79,7 +85,7 @@ case "$CMD" in
         wr vpc service create "$name" "${args[@]}" >/dev/null || die "create failed for $name"
       fi
     done <<<"$LINES"
-    info "Done. Run ./services.sh bindings for the Worker config."
+    info "Done. Run ./services.sh bindings for the Worker config, or ./services.sh list for a Hyperdrive service id."
     ;;
   list)
     while read -r name scheme kind host port; do
@@ -88,7 +94,8 @@ case "$CMD" in
     ;;
   bindings)
     entries=()
-    while read -r name _; do
+    while read -r name scheme _; do
+      [[ "$scheme" != postgres ]] || continue
       id="$(remote_id "$name")"
       [[ -n "$id" ]] || die "$name does not exist in Cloudflare. Run ./services.sh apply first."
       entries+=("$(printf '  { "binding": "%s", "service_id": "%s", "remote": true }' "$(binding_name "$name")" "$id")")
