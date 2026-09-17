@@ -4,6 +4,27 @@
 # pg-production:5432. Your Mac reaches it over Tailscale through PG_BIND.
 # Setup, Hyperdrive and tuning notes: docs/wiki/POSTGRES-CF-TUNNEL.md
 services:
+  # Hyperdrive requires TLS, and the Postgres image starts with ssl=off. This one-shot
+  # job makes a self-signed certificate once and keeps it in the pg_tls volume.
+  # Hyperdrive accepts a self-signed certificate. Delete the volume to renew it.
+  pg-tls:
+    image: postgres:18.6-trixie
+    restart: "no"
+    entrypoint: ["sh", "-ec"]
+    command:
+      - |
+        if [ ! -s /tls/server.key ]; then
+          openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+            -subj /CN=pg-production -keyout /tls/server.key -out /tls/server.crt
+        fi
+        chown postgres:postgres /tls/server.key /tls/server.crt
+        chmod 600 /tls/server.key
+    volumes:
+      - pg_tls:/tls
+    network_mode: none
+    security_opt:
+      - no-new-privileges:true
+
   postgres:
     image: postgres:18.6-trixie
     restart: unless-stopped
@@ -15,6 +36,10 @@ services:
     # Postgres 18 images keep data under /var/lib/postgresql/18/docker.
     volumes:
       - pg_data:/var/lib/postgresql
+      - pg_tls:/etc/postgresql-tls:ro
+    depends_on:
+      pg-tls:
+        condition: service_completed_successfully
     # Set PG_BIND to the VPS tailnet IP (100.120.15.77) for access from your Mac.
     # The default binds to loopback only. Never set 0.0.0.0: Docker ports skip UFW.
     ports:
@@ -26,6 +51,12 @@ services:
     # Sized for a 2 GB container on a 6 vCPU SSD host. Change these with PG_MEM_LIMIT.
     command:
       - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/etc/postgresql-tls/server.crt
+      - -c
+      - ssl_key_file=/etc/postgresql-tls/server.key
       - -c
       - max_connections=${PG_MAX_CONNECTIONS:-100}
       - -c
@@ -138,6 +169,7 @@ services:
 
 volumes:
   pg_data:
+  pg_tls:
 
 networks:
   db:
