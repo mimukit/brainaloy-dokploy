@@ -1,4 +1,5 @@
 # Production Postgres 18 + its own cloudflared connector, on one private network.
+# Deploy one copy for each Cloudflare account (see the instance table in the doc).
 # Postgres publishes no public port. Hyperdrive reaches it through the tunnel at
 # pg-production:5432. Your Mac reaches it over Tailscale through PG_BIND.
 # Setup, Hyperdrive and tuning notes: docs/wiki/POSTGRES-CF-TUNNEL.md
@@ -97,9 +98,10 @@ services:
       retries: 5
       start_period: 30s
 
-  # Connector for its own tunnel. Do not reuse the brainaloy-vps-cf-tunnel token:
+  # Connector for its own tunnel. Do not reuse the brainaloy-vps-cf-tunnel token or
+  # the token of another Postgres instance:
   # Cloudflare spreads traffic across all connectors of a tunnel, and those cannot
-  # resolve pg-production.
+  # reach this network.
   cloudflared:
     image: cloudflare/cloudflared:2026.9.1
     restart: unless-stopped
