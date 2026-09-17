@@ -1,0 +1,142 @@
+# Production Postgres 18 + its own cloudflared connector, on one private network.
+# Postgres publishes no public port. Hyperdrive reaches it through the tunnel at
+# pg-production:5432. Your Mac reaches it over Tailscale through PG_BIND.
+# Setup, Hyperdrive and tuning notes: docs/wiki/POSTGRES-CF-TUNNEL.md
+services:
+  postgres:
+    image: postgres:18.6-trixie
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-app}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--data-checksums
+    # Postgres 18 images keep data under /var/lib/postgresql/18/docker.
+    volumes:
+      - pg_data:/var/lib/postgresql
+    # Set PG_BIND to the VPS tailnet IP (100.120.15.77) for access from your Mac.
+    # The default binds to loopback only. Never set 0.0.0.0: Docker ports skip UFW.
+    ports:
+      - "${PG_BIND:-127.0.0.1}:${PG_HOST_PORT:-5434}:5432"
+    networks:
+      db:
+        aliases:
+          - pg-production
+    # Sized for a 2 GB container on a 6 vCPU SSD host. Change these with PG_MEM_LIMIT.
+    command:
+      - postgres
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-100}
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-512MB}
+      - -c
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-1536MB}
+      - -c
+      - work_mem=${PG_WORK_MEM:-8MB}
+      - -c
+      - maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-128MB}
+      - -c
+      - huge_pages=off
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - io_method=worker
+      - -c
+      - io_workers=3
+      - -c
+      - max_worker_processes=6
+      - -c
+      - max_parallel_workers=4
+      - -c
+      - max_parallel_workers_per_gather=2
+      - -c
+      - max_parallel_maintenance_workers=2
+      - -c
+      - wal_compression=zstd
+      - -c
+      - min_wal_size=512MB
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - autovacuum_vacuum_scale_factor=0.05
+      - -c
+      - autovacuum_analyze_scale_factor=0.02
+      - -c
+      - idle_in_transaction_session_timeout=5min
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - track_io_timing=on
+      - -c
+      - log_min_duration_statement=${PG_LOG_SLOW_MS:-500}
+      - -c
+      - log_lock_waits=on
+      - -c
+      - log_temp_files=0
+    shm_size: ${PG_SHM_SIZE:-256m}
+    stop_grace_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${PG_MEM_LIMIT:-2g}
+    mem_reservation: ${PG_MEM_RESERVATION:-1g}
+    cpus: ${PG_CPUS:-2}
+    pids_limit: ${PG_PIDS_LIMIT:-512}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-10m}
+        max-file: ${LOG_MAX_FILE:-3}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Connector for its own tunnel. Do not reuse the brainaloy-vps-cf-tunnel token:
+  # Cloudflare spreads traffic across all connectors of a tunnel, and those cannot
+  # resolve pg-production.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.1
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:2000 run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:?set TUNNEL_TOKEN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      replicas: ${CF_REPLICAS:-2}
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - db
+    mem_limit: ${CF_MEM_LIMIT:-128m}
+    mem_reservation: ${CF_MEM_RESERVATION:-32m}
+    cpus: ${CF_CPUS:-0.25}
+    pids_limit: ${CF_PIDS_LIMIT:-64}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-10m}
+        max-file: ${LOG_MAX_FILE:-3}
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  pg_data:
+
+networks:
+  db:
+    driver: bridge
