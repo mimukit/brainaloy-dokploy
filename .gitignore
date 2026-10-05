@@ -1,2 +1,5 @@
 # OS / editor noise
 .DS_Store
+
+# cf-security-setup.sh rule backups
+cf-backup/
