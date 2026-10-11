@@ -7,6 +7,7 @@ Cheap single-purpose DigitalOcean VPS servers run production WordPress sites. A 
 - [RUNBOOK](RUNBOOK.md) — the ordered tick-through checklist that stands up the whole setup, from OrbStack VM to firewall lockdown. Start here to build.
 - [WORDPRESS-STACK-TUNING](WORDPRESS-STACK-TUNING.md) — every tunable in the canonical WordPress compose stack, its default, the sizing formulas, and the troubleshooting table.
 - [CLOUDFLARE-CACHING](CLOUDFLARE-CACHING.md) — per-zone Cloudflare full-page caching for the brochure sites, with the bypass rules and the purge procedure.
+- [CLOUDFLARE-SECURITY](CLOUDFLARE-SECURITY.md): run `scripts/cf-security-setup.sh` to block scanner bots on each Cloudflare zone, then verify, restore from a backup, and turn off `workers.dev` on the Workers.
 - [BESZEL-MONITORING](BESZEL-MONITORING.md) — the Beszel hub behind a Tailscale sidecar, the host-binary agent install for each VM, and the optional custom domain for the hub UI.
 - [POSTGRES-CF-TUNNEL](POSTGRES-CF-TUNNEL.md) — production Postgres 18 with its own Cloudflare Tunnel connector for Hyperdrive, one stack per Cloudflare account, the TLS setup, the API role, and the tuning values.
 - [RESTORE](RESTORE.md) — recovery procedures for a dead panel, broken site content, a lost droplet, and break-glass access.

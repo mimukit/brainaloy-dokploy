@@ -23,3 +23,6 @@ pages:
   - path: RESTORE.md
     mode: how-to
     documents: [scripts/**, templates/wordpress.compose.yml, docs/wiki/RUNBOOK.md]
+  - path: CLOUDFLARE-SECURITY.md
+    mode: how-to
+    documents: [scripts/cf-security-setup.sh, .gitignore, brainaloy-vps-cf-tunnel/worker/wrangler.jsonc]
