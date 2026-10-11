@@ -7,9 +7,9 @@
 #   bash scripts/cf-security-setup.sh --dry-run    # same, explicit
 #   bash scripts/cf-security-setup.sh --apply      # sends the changes
 #
-# The script lists your zones and lets you pick one by one or all. For each zone it
-# lists the proxied DNS hosts and asks which of them are API hosts (server clients)
-# and which are WordPress sites.
+# The script asks for one account, then one active zone in that account. It lists the
+# proxied DNS hosts of the zone and asks which of them are API hosts (server clients)
+# and which are WordPress sites. Run it again for the next zone.
 #
 #   API hosts        no empty user agent block, no geo rule
 #   WordPress hosts  no blanket .php or /wp- block; the geo rule exempts the origin IPs
@@ -51,7 +51,8 @@ command -v pnpm >/dev/null || { echo "pnpm is required." >&2; exit 1; }
 [[ "$RL_REQUESTS" =~ ^[0-9]+$ ]] || { echo "RL_REQUESTS must be a number." >&2; exit 1; }
 
 # stdin from /dev/null, so pnpm or cf cannot eat the answers typed for the next prompt.
-cf() { pnpm --silent dlx "cf@${CF_VERSION}" "$@" </dev/null; }
+# --quiet hides the version banner; errors and the --dry-run request still print.
+cf() { pnpm --silent dlx "cf@${CF_VERSION}" "$@" --quiet </dev/null; }
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
@@ -125,27 +126,36 @@ pick_hosts() { # pick_hosts <question>; sets PICKED from HOSTS
   done
 }
 
-# --- zone selection ----------------------------------------------------------
+# --- account and zone selection ---------------------------------------------
 
-echo "==> Listing zones"
-cf zones list --per-page 50 > "$TMP/zones.json"
+pick_one() { # pick_one <what> <items...>; sets PICKED_INDEX (0-based index), exits on "q"
+  local what="$1" n i; shift
+  if [[ $# -eq 1 ]]; then PICKED_INDEX=0; echo "Only one ${what}: $1"; return 0; fi
+  for ((i = 1; i <= $#; i++)); do printf '  %2d) %s\n' "$i" "${!i}"; done
+  printf 'Pick one %s by number, or "q": ' "$what"
+  read -r n
+  [[ "$n" == "q" || -z "$n" ]] && exit 0
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= $# )) || { echo "Bad choice: $n" >&2; exit 1; }
+  PICKED_INDEX=$((n - 1))
+}
+
+echo "==> Listing accounts"
+cf accounts list > "$TMP/accounts.json"
+jq_accounts='if type=="array" then . else (.result // .accounts // []) end | .[]'
+mapfile -t ACCOUNT_NAMES < <(jq -r "$jq_accounts | .name" "$TMP/accounts.json")
+mapfile -t ACCOUNT_IDS < <(jq -r "$jq_accounts | .id" "$TMP/accounts.json")
+[[ ${#ACCOUNT_IDS[@]} -gt 0 ]] || { echo "No accounts found. Run 'cf auth login' first." >&2; exit 1; }
+pick_one account "${ACCOUNT_NAMES[@]}"
+# With more than one account, cf cannot find a zone by name until it knows the account.
+export CLOUDFLARE_ACCOUNT_ID="${ACCOUNT_IDS[$PICKED_INDEX]}"
+echo "Account: ${ACCOUNT_NAMES[$PICKED_INDEX]} (${CLOUDFLARE_ACCOUNT_ID})"
+
+echo "==> Listing active zones"
+cf zones list --account-id "$CLOUDFLARE_ACCOUNT_ID" --status active --per-page 50 > "$TMP/zones.json"
 mapfile -t ZONES < <(jq -r 'if type=="array" then . else (.result // .zones // []) end | .[].name' "$TMP/zones.json")
-[[ ${#ZONES[@]} -gt 0 ]] || { echo "No zones found. Run 'cf auth login' first." >&2; exit 1; }
-
-for i in "${!ZONES[@]}"; do printf '  %2d) %s\n' "$((i+1))" "${ZONES[$i]}"; done
-printf 'Pick numbers (space separated), "all", or "q": '
-read -r PICK
-[[ "$PICK" == "q" || -z "$PICK" ]] && exit 0
-
-SELECTED=()
-if [[ "$PICK" == "all" ]]; then
-  SELECTED=("${ZONES[@]}")
-else
-  for n in $PICK; do
-    [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#ZONES[@]} )) || { echo "Bad choice: $n" >&2; exit 1; }
-    SELECTED+=("${ZONES[$((n-1))]}")
-  done
-fi
+[[ ${#ZONES[@]} -gt 0 ]] || { echo "No active zones in this account." >&2; exit 1; }
+pick_one zone "${ZONES[@]}"
+SELECTED=("${ZONES[$PICKED_INDEX]}")
 
 # --- per-zone work -----------------------------------------------------------
 
