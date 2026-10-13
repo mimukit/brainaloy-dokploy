@@ -38,6 +38,9 @@ The same account also holds the WordPress brochure sites from this repo. `docs/w
 | Read-back | After `--apply` the script runs `phases get` for both phases. It compares `action`, `expression`, and the rate limit values with what it sent, and ignores fields that the API adds. It prints OK or MISMATCH. |
 | Rate limit | Default 300 requests per 10 s per IP and colo. `RL_REQUESTS` overrides it. The Free plan fixes the period at 10 s. Many Bangladeshi users share one mobile IP, so 100 was too tight. The expression is `starts_with(http.request.uri.path, "/")`, because the Free plan allows only the path and verified bot fields in a rate limiting rule. |
 | `workers_dev` reminder | The summary tells the owner to set `workers_dev: false` in each Worker, except `brainaloy-vps-cf-tunnel`. Its callers use its `workers.dev` URL. |
+| Hosting network rule (added 2026-10-13) | Managed Challenge when `ip.src.asnum` is in `HOSTING_ASNS`, with the same exceptions as the geo rule. On 2026-10-13, hosting networks sent 821 of 848 mitigated requests on mimukit.com. `HOSTING_ASNS` overrides the list. |
+| Geo rule per zone (added 2026-10-13) | The script asks `Challenge traffic from outside BD on <zone>? [Y/n]`. The 2026-10-13 Security Events showed the geo rule challenging real visitors from France, Brazil, Spain, and the Philippines on the mimukit.com portfolio, including the resume PDF. |
+| Wider probe list (added 2026-10-13) | `.env` anywhere in the path, `%25` (double encoding), `phpinfo`, `/.svn`, `/.ds_store`, `/.vscode`, `/actuator`, `/server-status`, `laravel-filemanager`, `/venv/`, and the endings `.sh`, `.cgi`, `.jsp`, `.yml`, `.yaml`, `.tar.gz`, `.tgz`. These probes passed the probe rule on 2026-10-13 and only the geo rule caught them. |
 | Non-interactive mode | A non-goal. The script has prompts and no skip flags. |
 | Probe path match | `ends_with`, `contains`, `starts_with`. The `matches` regex operator needs a Business plan. |
 | Country field | `ip.src.country`. `ip.geoip.country` is deprecated. |
@@ -57,7 +60,8 @@ The protection set per zone, within Free plan limits (5 custom rules, 1 rate lim
 
 - Custom rule 1: block when `cf.edge.server_port` is not 443 or 80.
 - Custom rule 2: block probes. It blocks the common scanner paths on every host. It blocks paths ending `.php` or starting `/wp-` on every host except the WordPress hosts. It blocks an empty user agent on every host except the API hosts.
-- Custom rule 3: Managed Challenge when `ip.src.country ne "BD"`, with the exceptions in the table above.
+- Custom rule 3: Managed Challenge when `ip.src.asnum` is in `HOSTING_ASNS`, with the exceptions in the table above.
+- Custom rule 4, only when the owner says yes: Managed Challenge when `ip.src.country ne "BD"`, with the same exceptions.
 - Rate limit: `RL_REQUESTS` (default 300) per 10 s, mitigation timeout 10 s, characteristics `cf.colo.id` and `ip.src`, action block.
 - Zone setting `always_use_https` set to `on`.
 - Zone setting `browser_check` set to `on`, only when the zone has no API host.
@@ -125,7 +129,7 @@ Done when: each applied zone prints `Read-back ... OK` for both phases, a `cf-ba
 - The WordPress origin IP comes from the DNS record. If the VPS sends from another IP, for example when the record points to a DigitalOcean reserved IP, the loopback calls still hit the geo challenge. The Site Health check in Phase 3 shows it.
 - `/xmlrpc.php` is blocked on WordPress hosts. Jetpack and the WordPress mobile app need it. Remove it from the common list if a site uses either.
 - A Worker custom domain may exist only as a route, not as a DNS record. Such a host does not appear in the picker.
-- The geo rule has no per-zone override. A zone that serves foreign users needs a way out. Deferred until such a zone exists.
+- The geo rule had no per-zone override. Resolved on 2026-10-13: the script now asks per zone.
 
 ## Non-goals
 
