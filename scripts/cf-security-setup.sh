@@ -9,11 +9,14 @@
 #
 # The script asks for one account, then one active zone in that account. It lists the
 # proxied DNS hosts of the zone and asks which of them are API hosts (server clients)
-# and which are WordPress sites. Run it again for the next zone.
+# and which are WordPress sites. Then it asks if the zone gets the geo rule. Say no for
+# a zone with real visitors outside Bangladesh, such as a portfolio. Run it again for
+# the next zone.
 #
-#   API hosts        no empty user agent block, no geo rule
-#   WordPress hosts  no blanket .php or /wp- block; the geo rule exempts the origin IPs
-#                    of their A/AAAA records, so wp-cron loopback calls still work
+#   API hosts        no empty user agent block, no hosting network rule, no geo rule
+#   WordPress hosts  no blanket .php or /wp- block; the hosting network and geo rules
+#                    exempt the origin IPs of their A/AAAA records, so wp-cron loopback
+#                    calls still work
 #
 # WARNING: `phases update` REPLACES every rule in the phase. Custom rules made by
 # hand in the dashboard are deleted. In --apply mode the script saves both phases and
@@ -25,7 +28,8 @@
 # Browser Integrity Check only for zones with no API host. Otherwise the script leaves
 # your manual choice as it is.
 #
-# Env: RL_REQUESTS=<n>  rate limit per 10 s per IP and colo (default 300).
+# Env: RL_REQUESTS=<n>       rate limit per 10 s per IP and colo (default 300).
+#      HOSTING_ASNS="<n> ..."  hosting networks to challenge (default: the list below).
 set -euo pipefail
 
 if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
@@ -36,6 +40,11 @@ fi
 CF_VERSION="1.0.0-beta.12"
 GEO_ACTION="managed_challenge"
 RL_REQUESTS="${RL_REQUESTS:-300}"   # Free plan: period 10 s, timeout 10 s
+# Hosting networks that sent 97% of the mitigated requests on mimukit.com (2026-10-13):
+# Microsoft 8075, Amazon 16509 14618, Google Cloud 396982, Oracle 31898, DigitalOcean 14061,
+# Hetzner 24940, OVH 16276, Linode 63949, Vultr 20473, Tencent 132203 45090,
+# Alibaba 37963 45102, TECHOFF 48090.
+HOSTING_ASNS="${HOSTING_ASNS:-8075 16509 14618 396982 31898 14061 24940 16276 63949 20473 132203 45090 37963 45102 48090}"
 BACKUP_DIR="cf-backup"
 APPLY=0
 
@@ -49,6 +58,7 @@ esac
 command -v jq >/dev/null || { echo "jq is required." >&2; exit 1; }
 command -v pnpm >/dev/null || { echo "pnpm is required." >&2; exit 1; }
 [[ "$RL_REQUESTS" =~ ^[0-9]+$ ]] || { echo "RL_REQUESTS must be a number." >&2; exit 1; }
+[[ "$HOSTING_ASNS" =~ ^[0-9]+( +[0-9]+)*$ ]] || { echo "HOSTING_ASNS must be numbers separated by spaces." >&2; exit 1; }
 
 # stdin from /dev/null, so pnpm or cf cannot eat the answers typed for the next prompt.
 # --quiet hides the version banner; errors and the --dry-run request still print.
@@ -60,33 +70,48 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 json_list() { jq -n '$ARGS.positional' --args "$@"; }
 
-custom_rules() { # custom_rules <api-hosts-json> <wordpress-hosts-json> <origin-ips-json>
-  jq -n --argjson api "$1" --argjson wp "$2" --argjson ips "$3" --arg geo "$GEO_ACTION" '
+custom_rules() { # custom_rules <api-hosts-json> <wordpress-hosts-json> <origin-ips-json> <geo: 0|1>
+  jq -n --argjson api "$1" --argjson wp "$2" --argjson ips "$3" --argjson geo_on "$4" \
+        --arg geo "$GEO_ACTION" --arg asns "$HOSTING_ASNS" '
     def hostset: "{" + (map("\"" + . + "\"") | join(" ")) + "}";
     def unless_host($hosts): if ($hosts | length) > 0 then " and not http.host in " + ($hosts | hostset) else "" end;
     "lower(http.request.uri.path)" as $p
     | ("(http.user_agent eq \"\"" + unless_host($api) + ")") as $ua
-    # Scanner paths that no Worker and no WordPress site serves.
-    | ([ "(\($p) contains \"/.env\")", "(\($p) contains \"/.git\")", "(\($p) contains \"/.aws/\")",
-         "(\($p) contains \"wp-config.php\")", "(\($p) contains \"/phpmyadmin\")",
+    # Scanner paths that no Worker and no WordPress site serves. %25 is a double-encoded
+    # path such as /%252fsysadmin%252f.env; Cloudflare does not decode it.
+    | ([ "(\($p) contains \".env\")", "(\($p) contains \"/.git\")", "(\($p) contains \"/.aws/\")",
+         "(\($p) contains \"/.svn\")", "(\($p) contains \"/.ds_store\")", "(\($p) contains \"/.vscode\")",
+         "(\($p) contains \"%25\")", "(\($p) contains \"phpinfo\")", "(\($p) contains \"wp-config.php\")",
+         "(\($p) contains \"/phpmyadmin\")", "(\($p) contains \"/actuator\")", "(\($p) contains \"/server-status\")",
+         "(\($p) contains \"laravel-filemanager\")",
          "(ends_with(\($p), \".ini\"))", "(ends_with(\($p), \".sql\"))", "(ends_with(\($p), \".bak\"))",
+         "(ends_with(\($p), \".sh\"))", "(ends_with(\($p), \".cgi\"))", "(ends_with(\($p), \".jsp\"))",
+         "(ends_with(\($p), \".yml\"))", "(ends_with(\($p), \".yaml\"))",
+         "(ends_with(\($p), \".tar.gz\"))", "(ends_with(\($p), \".tgz\"))",
          "(ends_with(\($p), \"/xmlrpc.php\"))",
-         "(starts_with(\($p), \"/vendor/\"))", "(starts_with(\($p), \"/cgi-bin/\"))" ] | join(" or ")) as $common
+         "(starts_with(\($p), \"/vendor/\"))", "(starts_with(\($p), \"/cgi-bin/\"))",
+         "(starts_with(\($p), \"/venv/\"))" ] | join(" or ")) as $common
     # A Worker has no PHP, so every .php or /wp- path is a probe. WordPress hosts need both.
     | ("((ends_with(\($p), \".php\") or starts_with(\($p), \"/wp-\"))" + unless_host($wp) + ")") as $php
-    | ("(ip.src.country ne \"BD\" and not cf.client.bot"
+    # Shared by the hosting network and geo rules.
+    | (" and not cf.client.bot"
        + " and not starts_with(http.request.uri.path, \"/.well-known/acme-challenge/\")"
        + unless_host($api)
        + (if ($ips | length) > 0 then " and not ip.src in {" + ($ips | join(" ")) + "}" else "" end)
-       + ")") as $geo_expr
+       + ")") as $exempt
+    | ($asns | split(" ") | map(select(. != "")) | join(" ")) as $asn_set
     | [
         { action: "block", description: "Block non-standard ports",
           expression: "(cf.edge.server_port ne 443 and cf.edge.server_port ne 80)" },
         { action: "block", description: "Block scanner probes",
           expression: ($ua + " or " + $common + " or " + $php) },
-        { action: $geo, description: "Non-BD traffic (verified bots, API hosts, origins allowed)",
-          expression: $geo_expr }
-      ]'
+        { action: "managed_challenge", description: "Hosting networks (verified bots, API hosts, origins allowed)",
+          expression: ("(ip.src.asnum in {" + $asn_set + "}" + $exempt) }
+      ]
+    + (if $geo_on == 1 then
+        [ { action: $geo, description: "Non-BD traffic (verified bots, API hosts, origins allowed)",
+            expression: ("(ip.src.country ne \"BD\"" + $exempt) } ]
+       else [] end)'
 }
 
 rate_rules() {
@@ -163,7 +188,7 @@ DRY=(); [[ $APPLY -eq 0 ]] && DRY=(--dry-run)
 [[ $APPLY -eq 1 ]] && echo "==> APPLY mode: changes go to Cloudflare." || echo "==> DRY RUN: reads are real, writes are only printed."
 
 harden_zone() { # harden_zone <zone>; returns 3 when the owner skips the zone, other non-zero on failure
-  local zone="$1" dir="$TMP/$1" api=() wp=() h s
+  local zone="$1" dir="$TMP/$1" api=() wp=() h s geo_on=1 answer
   mkdir -p "$dir/before"
   echo; echo "=== ${zone}"
 
@@ -180,6 +205,14 @@ harden_zone() { # harden_zone <zone>; returns 3 when the owner skips the zone, o
   else
     echo "  (none found; treating the zone as having no API or WordPress host)"
   fi
+  # Say no for a zone whose real visitors are outside BD, such as a portfolio.
+  printf 'Challenge traffic from outside BD on %s? [Y/n]: ' "$zone"
+  read -r answer
+  case "$answer" in
+    ""|y|Y) geo_on=1; echo "Geo rule: on" ;;
+    n|N) geo_on=0; echo "Geo rule: off (hosting networks are still challenged)" ;;
+    *) echo "Bad choice: $answer" >&2; return 1 ;;
+  esac
 
   local api_json wp_json ips_json
   api_json="$(json_list "${api[@]}")"
@@ -189,9 +222,9 @@ harden_zone() { # harden_zone <zone>; returns 3 when the owner skips the zone, o
     | .content ] | unique' "$dir/dns.json")"
   if [[ ${#wp[@]} -gt 0 ]]; then
     if [[ "$(jq length <<<"$ips_json")" -gt 0 ]]; then
-      echo "Geo rule exempts WordPress origin IPs: $(jq -r 'join(" ")' <<<"$ips_json")"
+      echo "Hosting network and geo rules exempt WordPress origin IPs: $(jq -r 'join(" ")' <<<"$ips_json")"
     else
-      echo "WARNING: no A or AAAA record for the WordPress sites. Their loopback calls (wp-cron) will hit the geo challenge." >&2
+      echo "WARNING: no A or AAAA record for the WordPress sites. Their loopback calls (wp-cron) will hit the hosting network challenge." >&2
     fi
   fi
 
@@ -217,7 +250,7 @@ harden_zone() { # harden_zone <zone>; returns 3 when the owner skips the zone, o
     echo "Backup saved: ${backup}/"
   fi
 
-  custom_rules "$api_json" "$wp_json" "$ips_json" > "$dir/custom.json"
+  custom_rules "$api_json" "$wp_json" "$ips_json" "$geo_on" > "$dir/custom.json"
   rate_rules > "$dir/rate.json"
 
   cf rulesets account-rulesets phases update http_request_firewall_custom --zone "$zone" --rules "@$dir/custom.json" "${DRY[@]}"
