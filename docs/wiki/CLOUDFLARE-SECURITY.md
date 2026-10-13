@@ -1,6 +1,6 @@
 # Cloudflare Security: Harden Zones Against Scanner Bots
 
-`scripts/cf-security-setup.sh` applies one protection set to the Cloudflare zone you pick. It works on one zone per run. It blocks scanner probes and non-standard ports, puts a Managed Challenge on traffic from outside Bangladesh, adds a per-IP rate limit, and turns on a few zone settings. Everything stays inside the Free plan limits. The design and the reasons behind each rule are in [the plan](../plans/0001-plan-cf-security-setup-2026-10-05.md).
+`scripts/cf-security-setup.sh` applies one protection set to the Cloudflare zone you pick. It works on one zone per run. It blocks scanner probes and non-standard ports, puts a Managed Challenge on traffic from hosting networks and (if you choose) from outside Bangladesh, adds a per-IP rate limit, and turns on a few zone settings. Everything stays inside the Free plan limits. The design and the reasons behind each rule are in [the plan](../plans/0001-plan-cf-security-setup-2026-10-05.md).
 
 Do the steps in order. Run a dry run first, then apply to a test zone, then to the real zones.
 
@@ -13,10 +13,11 @@ Legend: `[ ]` todo · 🖐 manual dashboard step · ⛔ verification gate
 | Change | Applies to |
 |--------|-----------|
 | Block requests on any port other than 80 and 443 | every host |
-| Block common scanner paths: `/.env`, `/.git`, `/.aws/`, `wp-config.php`, `/phpmyadmin`, `/xmlrpc.php`, `/vendor/`, `/cgi-bin/`, and paths ending `.ini`, `.sql`, `.bak` | every host, WordPress included |
+| Block common scanner paths: any path with `.env`, `/.git`, `/.aws/`, `/.svn`, `/.ds_store`, `/.vscode`, `%25` (double encoding), `phpinfo`, `wp-config.php`, `/phpmyadmin`, `/actuator`, `/server-status`, or `laravel-filemanager`; paths starting `/vendor/`, `/cgi-bin/`, `/venv/`; paths ending `/xmlrpc.php`, `.ini`, `.sql`, `.bak`, `.sh`, `.cgi`, `.jsp`, `.yml`, `.yaml`, `.tar.gz`, `.tgz` | every host, WordPress included |
 | Block requests with an empty user agent | every host except API hosts |
 | Block every path ending `.php` or starting `/wp-` | every host except WordPress hosts |
-| Managed Challenge for traffic from outside BD | every host except API hosts. Verified bots, `/.well-known/acme-challenge/`, and the origin IPs of the WordPress hosts pass. |
+| Managed Challenge for traffic from hosting networks (`HOSTING_ASNS`: Microsoft, Amazon, Google Cloud, Oracle, DigitalOcean, Hetzner, OVH, Linode, Vultr, Tencent, Alibaba, TECHOFF) | every host except API hosts. Verified bots, `/.well-known/acme-challenge/`, and the origin IPs of the WordPress hosts pass. |
+| Managed Challenge for traffic from outside BD | only when you answer yes to the geo question. Every host except API hosts, with the same exemptions as the hosting network rule. |
 | Rate limit: block an IP for 10 s after 300 requests in 10 s on one colo | every host |
 | Always Use HTTPS on | the whole zone |
 | Browser Integrity Check on | only a zone with no API host |
@@ -70,11 +71,12 @@ bash scripts/cf-security-setup.sh
 1. The script lists the accounts of your `cf` login. Type the number of one account, or `q` to quit. With only one account, the script picks it.
 2. The script lists the active zones in that account. Type the number of one zone, or `q` to quit.
 3. The script lists the proxied DNS hosts of the zone: the domain and its subdomains. Type the numbers of the API hosts, separated by spaces. Then type the numbers of the WordPress sites. Press Enter on an empty line for none.
-4. The script prints the WordPress origin IPs that the geo rule exempts, the current custom rules, and each write command with its request body.
+4. The script asks `Challenge traffic from outside BD on <zone>? [Y/n]`. Answer `n` for a zone whose real visitors are outside Bangladesh, such as the mimukit.com portfolio. The hosting network rule stays on either way.
+5. The script prints the WordPress origin IPs that the hosting network and geo rules exempt, the current custom rules, and each write command with its request body.
 
 - [ ] ⛔ The account list shows your accounts, and the zone list shows the active zones of the account you picked.
 - [ ] ⛔ The host list shows the proxied hosts you expect.
-- [ ] ⛔ `Geo rule exempts WordPress origin IPs:` shows the VPS IP of each WordPress site. If you see `WARNING: no A or AAAA record for the WordPress sites`, wp-cron loopback calls will hit the geo challenge. Fix the DNS record before you apply.
+- [ ] ⛔ `Hosting network and geo rules exempt WordPress origin IPs:` shows the VPS IP of each WordPress site. If you see `WARNING: no A or AAAA record for the WordPress sites`, wp-cron loopback calls will hit the hosting network challenge. Fix the DNS record before you apply.
 - [ ] ⛔ Every read succeeds and the summary shows the zone as `OK`.
 - [ ] Read the `current custom rules (they will be replaced)` list. Copy any hand-made rule you want to keep, because the apply deletes it.
 
@@ -82,6 +84,12 @@ To change the rate limit, set `RL_REQUESTS` (requests per 10 s per IP and colo, 
 
 ```bash
 RL_REQUESTS=500 bash scripts/cf-security-setup.sh
+```
+
+To change the hosting networks, set `HOSTING_ASNS` to AS numbers separated by spaces. The value replaces the default list:
+
+```bash
+HOSTING_ASNS="8075 16509 14618" bash scripts/cf-security-setup.sh
 ```
 
 ---
@@ -203,7 +211,9 @@ The script has no restore flag. Restore by hand:
 ## Known limits
 
 - The script reads hosts from DNS records. A Worker custom domain that exists only as a route does not appear in the host picker.
-- The geo rule has no per-zone override. A zone that serves users outside Bangladesh needs a change to `custom_rules()` first.
+- The hosting network rule challenges every server in those networks, including your own servers and uptime monitors. DigitalOcean (14061) is in the list, so a droplet that calls a host on the zone gets a challenge. Mark that host as an API host, or remove the AS number from `HOSTING_ASNS`.
+- The probe rule blocks paths ending `.yml` and `.yaml` on every host, API hosts included. An API host that serves an OpenAPI file in YAML needs a change to `custom_rules()` first.
+- The export of Security Events shows only mitigated requests. To see the probes that pass every rule, use Analytics → Traffic with a status `404` filter.
 - Bot Fight Mode and Browser Integrity Check are zone-wide on the Free plan. Put API hosts on a separate zone if you want both on for the browser hosts.
 
 ---
