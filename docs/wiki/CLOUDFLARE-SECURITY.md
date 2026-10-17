@@ -20,10 +20,18 @@ Legend: `[ ]` todo · 🖐 manual dashboard step · ⛔ verification gate
 | Managed Challenge for traffic from outside BD | only when you answer yes to the geo question. Every host except API hosts, with the same exemptions as the hosting network rule. |
 | Rate limit: block an IP for 10 s after 300 requests in 10 s on one colo | every host |
 | Always Use HTTPS on | the whole zone |
+| HTTP to HTTPS Redirect Rule, status 301 | when you select redirect setup |
+| WWW to root Redirect Rule, status 301 | default redirect choice; root to WWW and HTTPS only are also available |
 | Browser Integrity Check on | only a zone with no API host |
 | Bot Fight Mode on | only a zone with no API host and no WordPress host |
 
 > **The script replaces all custom rules and all rate limiting rules on the zone.** Any rule you made by hand in the dashboard is deleted. In `--apply` mode the script saves the old rules first (see [Restore from a backup](#restore-from-a-backup)).
+
+Redirect setup puts `Security setup: HTTP to HTTPS` first, before all existing Redirect Rules. Other existing rules keep their relative order. The hostname rule follows those rules. Its name shows the selected direction as `Security setup: www to non-www` or `Security setup: non-www to www`. Existing rules can override the hostname redirect. The script replaces only rules with refs `cf_security_canonical_host` and `cf_security_https`. A later run can change the direction without adding duplicate rules.
+
+The HTTPS rule uses `(not ssl)` to match unencrypted client connections. Cloudflare documents the [`ssl` field](https://developers.cloudflare.com/ruleset-engine/rules-language/fields/reference/ssl/) as a boolean.
+
+Both redirects preserve the path and query string. HTTP requests first redirect to HTTPS on the same host. The hostname rule then redirects to the selected host. Other subdomains keep their hostname. The source host needs proxied DNS. The target host needs DNS and HTTPS. The script does not create DNS records.
 
 The script never turns Bot Fight Mode or Browser Integrity Check off. When it skips them, it prints why and leaves your current choice.
 
@@ -52,7 +60,7 @@ Run the script on your own machine, where you can log in to Cloudflare in a brow
 
 If your login has more than one Cloudflare account, the script asks you to pick one and sets `CLOUDFLARE_ACCOUNT_ID` for the run. You do not set it yourself.
 
-If a later read or write fails with a 403, the login does not have enough scope. Log in with `--scopes`, or use an API token with Zone WAF Edit, Zone Settings Edit, Bot Management Edit, and DNS Read.
+If a later read or write fails with a 403, the login does not have enough scope. Log in with `--scopes`, or use an API token. The token needs Zone WAF Edit, Zone Settings Edit, Bot Management Edit, and DNS Read. Redirect setup also needs Dynamic URL Redirects Edit.
 
 ---
 
@@ -72,7 +80,8 @@ bash scripts/cf-security-setup.sh
 2. The script lists the active zones in that account. Type the number of one zone, or `q` to quit.
 3. The script lists the proxied DNS hosts of the zone: the domain and its subdomains. Type the numbers of the API hosts, separated by spaces. Then type the numbers of the WordPress sites. Press Enter on an empty line for none.
 4. The script asks `Challenge traffic from outside BD on <zone>? [Y/n]`. Answer `n` for a zone whose real visitors are outside Bangladesh, such as the mimukit.com portfolio. The hosting network rule stays on either way.
-5. The script prints the WordPress origin IPs that the hosting network and geo rules exempt, the current custom rules, and each write command with its request body.
+5. Select the redirect setup for this zone. Press Enter for HTTP to HTTPS and WWW to root. Select `2` for HTTP to HTTPS and root to WWW. Select `3` for HTTPS only. Select `0` to leave Redirect Rules unchanged. Always Use HTTPS remains enabled with every choice.
+6. The script prints the WordPress origin IPs that the hosting network and geo rules exempt. It prints the current custom rules and each write request. It also prints the proposed redirect rules when you select redirect setup.
 
 - [ ] ⛔ The account list shows your accounts, and the zone list shows the active zones of the account you picked.
 - [ ] ⛔ The host list shows the proxied hosts you expect.
@@ -176,6 +185,8 @@ Each `--apply` saves the state before the change to `cf-backup/<zone>-<UTC time>
 | `browser_check.json` | the Browser Integrity Check setting |
 | `bot_management.json` | the Bot Fight Mode config |
 
+When you select redirect setup, the backup also contains `http_request_dynamic_redirect.json`. An empty object means that the zone has no redirect ruleset before this run. Old backups and runs that skip redirect setup do not contain this file.
+
 The script has no restore flag. Restore by hand:
 
 1. Pick the backup directory, for example `cf-backup/example.com-20261005T120000Z/`. If your login has more than one account, set the account that owns the zone, or the `cf` commands below fail:
@@ -204,12 +215,45 @@ The script has no restore flag. Restore by hand:
    pnpm dlx cf@1.0.0-beta.12 zones settings edit browser_check --zone <domain> --body '{"value":"off"}'
    ```
 
-6. If `bot_management.json` shows Bot Fight Mode off, turn it off in the dashboard: 🖐 the zone → **Security → Bots**.
+6. Restore Redirect Rules when the backup contains `http_request_dynamic_redirect.json`:
+
+   ```bash
+   jq '.rules // .result.rules // []' cf-backup/<dir>/http_request_dynamic_redirect.json > /tmp/redirect-rules.json
+   pnpm dlx cf@1.0.0-beta.12 rulesets account-rulesets phases update http_request_dynamic_redirect --zone <domain> --rules @/tmp/redirect-rules.json
+   ```
+
+   An empty backup produces an empty rule list. This removes the new redirects.
+7. If `bot_management.json` shows Bot Fight Mode off, turn it off in the dashboard: 🖐 the zone → **Security → Bots**.
 
 ---
 
+## Check the redirects
+
+Run these requests after an apply. Replace the domain with your zone.
+
+```bash
+curl -I 'http://www.example.com/test?source=check'
+curl -I 'https://www.example.com/test?source=check'
+curl -I 'http://example.com/test?source=check'
+```
+
+For WWW to root, the first request redirects to `https://www.example.com/test?source=check`. The second request redirects to `https://example.com/test?source=check`. For root to WWW, expect the WWW hostname as the target. The target HTTPS hostname must not redirect back to the source hostname. Existing Redirect Rules, Page Rules, or origin redirects can cause conflicts. Check them before you apply the new rules.
+
+The script verifies redirect rules immediately after their update. A later Bot Fight Mode failure can still produce a `FAILED` summary. Earlier changes remain active.
+
+## Offline checks
+
+Run the script checks without Cloudflare credentials:
+
+```bash
+python3 -B -m unittest discover -s tests -v
+```
+
+The tests use a fake `pnpm` executable. They send no Cloudflare requests. The tests require Bash 4.4 or newer and `jq`.
+
 ## Known limits
 
+- The Free plan allows 10 Single Redirect rules. The script stops before any write if the proposed redirect rules exceed this limit.
 - The script reads hosts from DNS records. A Worker custom domain that exists only as a route does not appear in the host picker.
 - The hosting network rule challenges every server in those networks, including your own servers and uptime monitors. DigitalOcean (14061) is in the list, so a droplet that calls a host on the zone gets a challenge. Mark that host as an API host, or remove the AS number from `HOSTING_ASNS`.
 - The probe rule blocks paths ending `.yml` and `.yaml` on every host, API hosts included. An API host that serves an OpenAPI file in YAML needs a change to `custom_rules()` first.
@@ -228,3 +272,5 @@ The script has no restore flag. Restore by hand:
 - [ ] Security Events watched for one hour per zone
 - [ ] WordPress Site Health shows no loopback error
 - [ ] `workers_dev: false` and `preview_urls: false` deployed on every Worker except `brainaloy-vps-cf-tunnel`
+
+The redirect payload follows the [Cloudflare Single Redirects API](https://developers.cloudflare.com/rules/url-forwarding/single-redirects/create-api/) and [redirect settings](https://developers.cloudflare.com/rules/url-forwarding/single-redirects/settings/).

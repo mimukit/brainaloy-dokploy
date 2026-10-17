@@ -19,9 +19,10 @@
 #                    calls still work
 #
 # WARNING: `phases update` REPLACES every rule in the phase. Custom rules made by
-# hand in the dashboard are deleted. In --apply mode the script saves both phases and
-# the zone settings it touches to cf-backup/<zone>-<UTC time>/ first, and asks for
-# confirmation per zone.
+# hand in the dashboard are deleted. In --apply mode the script saves the affected
+# phases and zone settings to cf-backup/<zone>-<UTC time>/ before it sends changes.
+# It asks for confirmation per zone. Redirect rules keep existing rules and update
+# only the two rules owned by this script. Redirects are optional per zone.
 #
 # Bot Fight Mode and Browser Integrity Check are zone-wide and cannot be scoped to a
 # host. Bot Fight Mode is turned on only for zones with no API or WordPress host, and
@@ -124,6 +125,40 @@ rate_rules() {
   ]'
 }
 
+# Stable refs identify only the redirect rules that this script owns.
+redirect_rules() { # redirect_rules <zone> <root|www|https> <current-phase-file>
+  jq --arg zone "$1" --arg mode "$2" '
+    def rules:
+      if type == "array" then . else (.rules // .result.rules // []) end;
+    def redirect($ref; $description; $match; $target):
+      {ref: $ref, description: $description, action: "redirect", enabled: true,
+       expression: $match,
+       action_parameters: {from_value: {status_code: 301, preserve_query_string: true,
+                                       target_url: {expression: $target}}}};
+    [redirect("cf_security_https"; "Security setup: HTTP to HTTPS";
+              "(not ssl)";
+              "concat(\"https://\", http.host, http.request.uri.path)")]
+    + (rules | map(select(.ref != "cf_security_canonical_host" and .ref != "cf_security_https")
+      | {id, ref, action, expression, description, enabled, action_parameters}
+      | with_entries(select(.value != null))))
+    + (if $mode == "https" then [] else
+        (if $mode == "www" then $zone else "www." + $zone end) as $source
+        | (if $mode == "www" then "www." + $zone else $zone end) as $target
+        | (if $mode == "www" then "Security setup: non-www to www"
+           else "Security setup: www to non-www" end) as $description
+        | [redirect("cf_security_canonical_host"; $description;
+                    ("(http.host eq " + ($source | tojson) + ")");
+                    ("concat(" + ("https://" + $target | tojson) + ", http.request.uri.path)"))]
+       end)
+    | if length > 10 then error("Redirect rules exceed the Free plan limit of 10; no changes sent") else . end
+  ' "$3"
+}
+
+redirect_shape() { # Preserve order: the first matching redirect wins.
+  jq -S 'if type == "array" then . else (.rules // .result.rules // []) end
+    | map({action, description, expression, enabled: (if .enabled == null then true else .enabled end), action_parameters})' "$1"
+}
+
 rule_shape() { # rule_shape <file>: the fields we send, from a phase get or a rules array, in a stable order
   jq -S 'if type=="array" then . else (.rules // .result.rules // []) end
     | map({action, expression,
@@ -188,7 +223,7 @@ DRY=(); [[ $APPLY -eq 0 ]] && DRY=(--dry-run)
 [[ $APPLY -eq 1 ]] && echo "==> APPLY mode: changes go to Cloudflare." || echo "==> DRY RUN: reads are real, writes are only printed."
 
 harden_zone() { # harden_zone <zone>; returns 3 when the owner skips the zone, other non-zero on failure
-  local zone="$1" dir="$TMP/$1" api=() wp=() h s geo_on=1 answer
+  local zone="$1" dir="$TMP/$1" api=() wp=() h s geo_on=1 answer redirects=skip
   mkdir -p "$dir/before"
   echo; echo "=== ${zone}"
 
@@ -214,6 +249,26 @@ harden_zone() { # harden_zone <zone>; returns 3 when the owner skips the zone, o
     *) echo "Bad choice: $answer" >&2; return 1 ;;
   esac
 
+  echo "--- redirect rules for ${zone}"
+  echo "  1) HTTP to HTTPS and WWW to root (default)"
+  echo "  2) HTTP to HTTPS and root to WWW"
+  echo "  3) HTTP to HTTPS only (remove this script's hostname redirect)"
+  echo "  0) Leave Redirect Rules unchanged"
+  printf 'Pick redirect rules [1]: '
+  read -r answer
+  case "$answer" in
+    ""|1) redirects=root ;;
+    2) redirects=www ;;
+    3) redirects=https ;;
+    0) redirects=skip ;;
+    *) echo "Bad choice: $answer" >&2; return 1 ;;
+  esac
+  if [[ "$redirects" != skip ]]; then
+    echo "Redirects use status 301 and keep the path and query string."
+    echo "HTTP to HTTPS is rule 1. Other existing rules keep their order."
+    echo "The source host needs proxied DNS. The target host needs DNS and HTTPS."
+  fi
+
   local api_json wp_json ips_json
   api_json="$(json_list "${api[@]}")"
   wp_json="$(json_list "${wp[@]}")"
@@ -236,13 +291,20 @@ harden_zone() { # harden_zone <zone>; returns 3 when the owner skips the zone, o
   done
   cf bot-management get --zone "$zone" > "$dir/before/bot_management.json"
 
+  if [[ "$redirects" != skip ]]; then
+    get_phase http_request_dynamic_redirect "$zone" "$dir/before/http_request_dynamic_redirect.json"
+    redirect_rules "$zone" "$redirects" "$dir/before/http_request_dynamic_redirect.json" > "$dir/redirect.json"
+    echo "--- proposed redirect rules (HTTP to HTTPS is first)"
+    jq . "$dir/redirect.json"
+  fi
+
   echo "--- current custom rules (they will be replaced)"
   jq -r 'if type=="array" then . else (.rules // .result.rules // []) end | .[] | "  - " + (.description // .expression)' \
     "$dir/before/http_request_firewall_custom.json"
 
   if [[ $APPLY -eq 1 ]]; then
     local ok backup
-    printf 'Replace all custom and rate limiting rules on %s? [y/N]: ' "$zone"
+    printf 'Replace custom and rate limiting rules and apply the selected redirects on %s? [y/N]: ' "$zone"
     read -r ok; [[ "$ok" == "y" ]] || { echo "Skipped."; return 3; }
     backup="${BACKUP_DIR}/${zone}-$(date -u +%Y%m%dT%H%M%SZ)"
     mkdir -p "$backup"
@@ -260,6 +322,17 @@ harden_zone() { # harden_zone <zone>; returns 3 when the owner skips the zone, o
     cf zones settings edit browser_check --zone "$zone" --body '{"value":"on"}' "${DRY[@]}"
   else
     echo "Browser Integrity Check: skipped (zone has API hosts; it cannot be scoped to a host)."
+  fi
+  if [[ "$redirects" != skip ]]; then
+    cf rulesets account-rulesets phases update http_request_dynamic_redirect --zone "$zone" --rules "@$dir/redirect.json" "${DRY[@]}"
+    if [[ $APPLY -eq 1 ]]; then
+      get_phase http_request_dynamic_redirect "$zone" "$dir/redirect-after.json"
+      if [[ "$(redirect_shape "$dir/redirect-after.json")" == "$(redirect_shape "$dir/redirect.json")" ]]; then
+        echo "Read-back http_request_dynamic_redirect: OK"
+      else
+        echo "Read-back http_request_dynamic_redirect: MISMATCH" >&2; return 1
+      fi
+    fi
   fi
   if [[ ${#api[@]} -eq 0 && ${#wp[@]} -eq 0 ]]; then
     cf bot-management update --zone "$zone" --fight-mode "${DRY[@]}"
