@@ -63,9 +63,19 @@ elif a[:3] == ["zones", "settings", "get"]:
 elif a[:3] == ["zones", "settings", "edit"]:
     emit({"value":"on"})
 elif a[:2] == ["bot-management", "get"]:
-    emit({"fight_mode":False})
+    config = state.get("bot_management", {"fight_mode":False, "enable_js":False})
+    if os.environ.get("FAKE_BOT_MISMATCH") and config.get("fight_mode"):
+        config = {**config, "enable_js":False}
+    emit(config)
 elif a[:2] == ["bot-management", "update"]:
-    emit({"fight_mode":True})
+    if "--enable-js" not in a:
+        print("cannot enable Fight_Mode while EnableJS is disabled", file=sys.stderr)
+        sys.exit(1)
+    config = {**state.get("bot_management", {}), "fight_mode":True, "enable_js":True}
+    if "--dry-run" not in a:
+        state["bot_management"] = config
+        p.write_text(json.dumps(state))
+    emit(config)
 else:
     sys.exit("Unexpected command: " + repr(a))
 '''
@@ -84,9 +94,9 @@ class RedirectChecks(unittest.TestCase):
         self.env = {**os.environ, "PATH": str(self.dir) + os.pathsep + os.environ["PATH"],
                     "FAKE_STATE": str(self.state), "FAKE_LOG": str(self.log)}
 
-    def run_script(self, choice="", apply=True, **env):
+    def run_script(self, choice="", apply=True, api="", wp="", **env):
         # One account and one zone need no answer. No API or WordPress hosts.
-        answers = "\n\n\n" + choice + "\n" + ("y\n" if apply else "")
+        answers = api + "\n" + wp + "\n\n" + choice + "\n" + ("y\n" if apply else "")
         return subprocess.run([BASH, str(SCRIPT), "--apply" if apply else "--dry-run"],
                               input=answers, text=True, capture_output=True, cwd=self.dir,
                               env={**self.env, **env})
@@ -96,6 +106,31 @@ class RedirectChecks(unittest.TestCase):
 
     def calls(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()]
+
+    def test_bot_fight_mode_enables_javascript_detections(self):
+        r = self.run_script()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        updates = [c for c in self.calls() if c[:2] == ["bot-management", "update"]]
+        self.assertEqual(len(updates), 1)
+        self.assertIn("--fight-mode", updates[0])
+        self.assertIn("--enable-js", updates[0])
+        self.assertIn("Read-back Bot Fight Mode and JavaScript detections: OK", r.stdout)
+        config = json.loads(self.state.read_text())["bot_management"]
+        self.assertTrue(config["fight_mode"])
+        self.assertTrue(config["enable_js"])
+
+    def test_bot_read_back_detects_disabled_javascript(self):
+        r = self.run_script(FAKE_BOT_MISMATCH="1")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("Read-back Bot Fight Mode and JavaScript detections: MISMATCH", r.stderr)
+
+    def test_bot_settings_stay_unchanged_for_api_and_wordpress_hosts(self):
+        for answers in [{"api":"1"}, {"wp":"1"}]:
+            with self.subTest(answers=answers):
+                self.log.write_text("")
+                r = self.run_script(**answers)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertFalse(any(c[:2] == ["bot-management", "update"] for c in self.calls()))
 
     def test_default_and_repeat_preserve_existing_rules_and_backup(self):
         for _ in range(2):

@@ -25,8 +25,9 @@
 # only the two rules owned by this script. Redirects are optional per zone.
 #
 # Bot Fight Mode and Browser Integrity Check are zone-wide and cannot be scoped to a
-# host. Bot Fight Mode is turned on only for zones with no API or WordPress host, and
-# Browser Integrity Check only for zones with no API host. Otherwise the script leaves
+# host. Bot Fight Mode requires JavaScript detections. The script enables both only
+# for zones with no API or WordPress host. The script enables Browser Integrity Check
+# only for zones with no API host. Otherwise the script leaves
 # your manual choice as it is.
 #
 # Env: RL_REQUESTS=<n>       rate limit per 10 s per IP and colo (default 300).
@@ -335,7 +336,16 @@ harden_zone() { # harden_zone <zone>; returns 3 when the owner skips the zone, o
     fi
   fi
   if [[ ${#api[@]} -eq 0 && ${#wp[@]} -eq 0 ]]; then
-    cf bot-management update --zone "$zone" --fight-mode "${DRY[@]}"
+    # Cloudflare rejects fight_mode=true when JavaScript detections are disabled.
+    cf bot-management update --zone "$zone" --enable-js --fight-mode "${DRY[@]}"
+    if [[ $APPLY -eq 1 ]]; then
+      cf bot-management get --zone "$zone" > "$dir/bot-after.json"
+      if jq -e '(.result // .) | .fight_mode == true and .enable_js == true' "$dir/bot-after.json" >/dev/null; then
+        echo "Read-back Bot Fight Mode and JavaScript detections: OK"
+      else
+        echo "Read-back Bot Fight Mode and JavaScript detections: MISMATCH" >&2; return 1
+      fi
+    fi
   else
     echo "Bot Fight Mode: skipped (zone has API or WordPress hosts; it cannot be scoped to a host)."
   fi

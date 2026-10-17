@@ -23,7 +23,7 @@ Legend: `[ ]` todo · 🖐 manual dashboard step · ⛔ verification gate
 | HTTP to HTTPS Redirect Rule, status 301 | when you select redirect setup |
 | WWW to root Redirect Rule, status 301 | default redirect choice; root to WWW and HTTPS only are also available |
 | Browser Integrity Check on | only a zone with no API host |
-| Bot Fight Mode on | only a zone with no API host and no WordPress host |
+| Bot Fight Mode and JavaScript detections on | only a zone with no API host and no WordPress host |
 
 > **The script replaces all custom rules and all rate limiting rules on the zone.** Any rule you made by hand in the dashboard is deleted. In `--apply` mode the script saves the old rules first (see [Restore from a backup](#restore-from-a-backup)).
 
@@ -32,6 +32,8 @@ Redirect setup puts `Security setup: HTTP to HTTPS` first, before all existing R
 The HTTPS rule uses `(not ssl)` to match unencrypted client connections. Cloudflare documents the [`ssl` field](https://developers.cloudflare.com/ruleset-engine/rules-language/fields/reference/ssl/) as a boolean.
 
 Both redirects preserve the path and query string. HTTP requests first redirect to HTTPS on the same host. The hostname rule then redirects to the selected host. Other subdomains keep their hostname. The source host needs proxied DNS. The target host needs DNS and HTTPS. The script does not create DNS records.
+
+Cloudflare requires JavaScript detections before it can enable Bot Fight Mode. The script enables both in one request and verifies both values.
 
 The script never turns Bot Fight Mode or Browser Integrity Check off. When it skips them, it prints why and leaves your current choice.
 
@@ -183,7 +185,7 @@ Each `--apply` saves the state before the change to `cf-backup/<zone>-<UTC time>
 | `http_ratelimit.json` | the rate limiting rule |
 | `always_use_https.json` | the Always Use HTTPS setting |
 | `browser_check.json` | the Browser Integrity Check setting |
-| `bot_management.json` | the Bot Fight Mode config |
+| `bot_management.json` | the Bot Fight Mode and JavaScript detections config |
 
 When you select redirect setup, the backup also contains `http_request_dynamic_redirect.json`. An empty object means that the zone has no redirect ruleset before this run. Old backups and runs that skip redirect setup do not contain this file.
 
@@ -223,7 +225,8 @@ The script has no restore flag. Restore by hand:
    ```
 
    An empty backup produces an empty rule list. This removes the new redirects.
-7. If `bot_management.json` shows Bot Fight Mode off, turn it off in the dashboard: 🖐 the zone → **Security → Bots**.
+7. Restore Bot Fight Mode to its saved value in the dashboard under **Security → Bots**.
+8. Restore JavaScript detections to the saved `enable_js` value after you restore Bot Fight Mode. Cloudflare rejects disabled JavaScript detections while Bot Fight Mode remains on.
 
 ---
 
